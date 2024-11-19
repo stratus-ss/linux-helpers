@@ -1,0 +1,87 @@
+- name: Install Desktop packages
+  become: yes
+  become_user: "{{ username }}"
+  kewlfft.aur.aur:
+    use: yay
+    name:
+      - file-roller
+      - terminator
+      - flameshot
+      - gvfs
+      - gvfs-nfs
+      - gvfs-smb
+      - eog
+      - xdg-user-dirs-gtk
+      - gnome-calculator
+      - ulauncher
+      - openaudible-bin
+      - beeper
+      - spideroak-one
+      - firefox
+    state: present
+
+- name: update the firefox icon
+  block:
+    - name: Ensure ~/.local/share/applications directory exists
+      file:
+        path: "{{ ansible_env.HOME }}/.local/share/applications"
+        state: directory
+        mode: '0755'
+    - name: Ensure ~/.local/share/icons directory exists
+      file:
+        path: "{{ ansible_env.HOME }}/.local/share/icons"
+        state: directory
+        mode: '0755'
+
+    - name: Copy Firefox desktop file
+      copy:
+        src: /usr/share/applications/firefox.desktop
+        dest: "{{ ansible_env.HOME }}/.local/share/applications/firefox.desktop"
+        mode: '0644'
+
+    - name: Copy Black Firefox icon
+      copy:
+        src: /mnt/icons/Black-Firefox-icon.png
+        dest: "{{ ansible_env.HOME }}/.local/share/icons/Black-Firefox-icon.png"
+        mode: '0644'
+
+    - name: Modify Icon path in Firefox desktop file
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.local/share/applications/firefox.desktop"
+        regexp: '^Icon=firefox$'
+        line: 'Icon=/home/stratus/.local/share/icons/Black-Firefox-icon.png'
+
+- name: Ensure mount point directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: '1000'
+    group: '1000'
+  loop:
+    - /home/stratus/Downloads
+    - /var/cache/pacman/pkg
+    - /blu_rays
+    - /home/stratus/Documents
+    - /home/stratus/OBS
+    - /1TB_nvme
+    - /home/stratus/Games
+  when:
+    - update_fstab | bool
+
+- name: update fstab
+  lineinfile:
+    path: /etc/fstab
+    line: "{{ item }}"
+    state: present
+  loop:
+    - "192.168.1.1:/storage/backups/desktop_mounts/stratus_Downloads   /home/stratus/Downloads  nfs  noauto,x-systemd.automount,x-systemd.device-timeout=10,timeo=05,nofail 0 0"
+    - "192.168.1.1:/storage/backups/pacman_cache   /var/cache/pacman/pkg/  nfs  noauto,x-systemd.automount,x-systemd.device-timeout=10,timeo=05,nofail 0 0"
+    - "/dev/disk/by-id/ata-ST4000DM004-2CV104_ZFN2RDWQ-part1  /blu_rays  xfs  defaults,nofail 0 2"
+    - "/blu_rays/stratus_home_dir/Documents/ /home/stratus/Documents   none bind"
+    - "/blu_rays/swapfile swap swap defaults,nofail 0 0"
+    - "/dev/disk/by-id/ata-SPCC_Solid_State_Disk_AA000000000000001885-part1 /home/stratus/OBS xfs defaults,rw,noatime,discard 0 0"
+    - "/dev/disk/by-id/nvme-Samsung_SSD_970_EVO_1TB_S5H9NS0N808837D-part1 /1TB_nvme xfs  rw,relatime,attr2,inode64,logbufs=8,logbsize=32k,noquota,nofail,noatime        0 1"
+    - "/1TB_nvme/Steam/ /home/stratus/Games none bind"
+  when:
+    - update_fstab | bool

@@ -5,24 +5,15 @@
     use: yay
     name:
       - cinnamon
-      - file-roller
-      - nautilus
-      - terminator
-      - flameshot
-      - gvfs
-      - gvfs-nfs
-      - gvfs-smb
       - lightdm
       - lightdm-slick-greeter
-      - eog
-      - xdg-user-dirs-gtk
       - arc-gtk-theme-eos
       - eos-lightdm-slick-theme
       - eos-qogir-icons
       - eos-settings-cinnamon
-      - gnome-calculator
+      - cinnamon-sounds
     state: present
- 
+
 - name: Enable systemd services
   systemd:
     name: "{{ item }}"
