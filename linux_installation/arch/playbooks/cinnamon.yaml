@@ -1,0 +1,31 @@
+- name: Install Cinnamon packages
+  become: yes
+  become_user: "{{ username }}"
+  kewlfft.aur.aur:
+    use: yay
+    name:
+      - cinnamon
+      - file-roller
+      - nautilus
+      - terminator
+      - flameshot
+      - gvfs
+      - gvfs-nfs
+      - gvfs-smb
+      - lightdm
+      - lightdm-slick-greeter
+      - eog
+      - xdg-user-dirs-gtk
+      - arc-gtk-theme-eos
+      - eos-lightdm-slick-theme
+      - eos-qogir-icons
+      - eos-settings-cinnamon
+      - gnome-calculator
+    state: present
+ 
+- name: Enable systemd services
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+  loop:
+    - lightdm
