@@ -1,0 +1,139 @@
+---
+- name: Configure ZFS on Arch Linux
+  hosts: localhost
+  become: yes
+  vars:
+    device_name: "/dev/sda"  # User-specified device name
+    efi_partition: ""
+    zfs_partition: ""
+    network_pacman_cache: true 
+    nfs_path: '192.168.99.95:/storage/backups/pacman_cache'
+
+  tasks:
+    - name: Fail if device_name is not specified
+      fail:
+        msg: "Please specify the device_name variable (e.g., -e device_name=/dev/sda)"
+      when: device_name == ''
+ 
+    - name: Install ZFS in the ArchISO
+      ansible.builtin.shell: curl -s https://raw.githubusercontent.com/eoli3n/archiso-zfs/master/init | bash
+      args:
+        executable: /bin/bash
+ 
+    - name: Set partition variables
+      set_fact:
+        efi_partition: "{{ device_name }}1"
+        zfs_partition: "{{ device_name }}2"
+ 
+     
+    - name: Zap all partitions on disk
+      command: sgdisk --zap-all {{ device_name }}
+ 
+    - name: Create EFI partition
+      command: sgdisk -n1:1M:+512M -t1:EF00 {{ device_name }}
+ 
+    - name: Create ZFS partition
+      command: sgdisk -n2:0:0 -t2:BF00 {{ device_name }}
+ 
+    - name: Format EFI partition
+      filesystem:
+        fstype: vfat
+        dev: "{{ efi_partition }}"
+        opts: "-F 32 -n EFI"
+    
+    - name: Get PARTUUID of ZFS partition
+      command: blkid -s PARTUUID -o value {{ zfs_partition }}
+      register: partuuid_output
+ 
+    - name: Set PARTUUID variable
+      set_fact:
+        zfs_partition_uuid: "{{ partuuid_output.stdout }}"
+    - name: Load ZFS module
+      modprobe:
+        name: zfs
+        state: present
+ 
+    - name: Create ZFS pool
+      command: >
+        zpool create -f -o ashift=12
+        -O acltype=posixacl
+        -O relatime=on
+        -O xattr=sa
+        -O dnodesize=legacy
+        -O normalization=formD
+        -O mountpoint=none
+        -O canmount=off
+        -O devices=off
+        -O compression=lz4
+        -R /mnt
+        zroot {{ zfs_partition }}
+ 
+    - name: Create ZFS datasets
+      zfs:
+        name: "{{ item.name }}"
+        state: present
+        extra_zfs_properties:
+          mountpoint: "{{ item.mountpoint }}"
+          canmount: "{{ item.canmount | default(omit) }}"
+      loop:
+        - { name: "zroot/data", mountpoint: "none" }
+        - { name: "zroot/ROOT", mountpoint: "none" }
+        - { name: "zroot/ROOT/default", mountpoint: "/", canmount: "noauto" }
+        - { name: "zroot/data/home", mountpoint: "/home" }
+ 
+    - name: Export ZFS pool
+      command: zpool export zroot
+ 
+    - name: Import ZFS pool
+      command: zpool import -d /dev/disk/by-path -R /mnt zroot -N
+ 
+    - name: Mount ZFS root dataset
+      command: zfs mount zroot/ROOT/default
+ 
+    - name: Mount ZFS home directory
+      command: zfs mount zroot/data/home
+ 
+    - name: Set bootfs property
+      command: zpool set bootfs=zroot/ROOT/default zroot
+ 
+    - name: Set cachefile property
+      command: zpool set cachefile=/etc/zfs/zpool.cache zroot
+ 
+    - name: Create ZFS cache directory
+      file:
+        path: /mnt/etc/zfs
+        state: directory
+ 
+    - name: Copy ZFS cache file
+      copy:
+        src: /etc/zfs/zpool.cache
+        dest: /mnt/etc/zfs/zpool.cache
+ 
+    - name: Create EFI mount directory
+      file:
+        path: /mnt/boot/EFI
+        state: directory
+ 
+    - name: Mount EFI partition
+      mount:
+        path: /mnt/boot/EFI
+        src: "{{ efi_partition }}"
+        fstype: vfat
+        state: mounted
+ 
+    - name: Remount NFS share
+      mount:
+        path: /var/cache/pacman/pkg
+        src: "{{ nfs_path }}"
+        fstype: nfs
+        state: mounted 
+      when:
+        - network_pacman_cache | bool
+    - name: Install base system
+      command: pacstrap /mnt linux-lts base base-devel intel-ucode nano nfs-utils ansible python-passlib
+ 
+    - name: Generate fstab
+      shell: genfstab -U /mnt >> /mnt/etc/fstab
+ 
+    - name: Update the mirrorlist
+      shell: reflector > /mnt/etc/pacman.d/mirrorlist

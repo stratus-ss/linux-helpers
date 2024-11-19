@@ -1,0 +1,44 @@
+---
+- name: Unmount filesystems, export zpool, and reboot
+  hosts: localhost
+  become: true  # This ensures the playbook runs with root privileges
+  tasks:
+    - name: Unmount /mnt/boot/EFI
+      ansible.posix.mount:
+        path: /mnt/boot/EFI
+        state: unmounted
+      ignore_errors: yes  # In case it's already unmounted
+
+    - name: Unmount /mnt/home
+      ansible.posix.mount:
+        path: /mnt/home
+        state: unmounted
+      ignore_errors: yes  # In case it's already unmounted
+
+    - name: Unmount /mnt
+      ansible.posix.mount:
+        path: /mnt
+        state: unmounted
+      ignore_errors: yes  # In case it's already unmounted
+
+    - name: Export zroot pool
+      ansible.builtin.command:
+        cmd: zpool export zroot
+      ignore_errors: yes  # In case the pool is already exported or doesn't exist
+
+    - name: Verify all unmounts and export
+      ansible.builtin.shell: |
+        mountpoint -q /mnt/boot/EFI || echo "/mnt/boot/EFI is unmounted"
+        mountpoint -q /mnt/home || echo "/mnt/home is unmounted"
+        mountpoint -q /mnt || echo "/mnt is unmounted"
+        zpool list zroot > /dev/null 2>&1 && echo "zroot is still imported" || echo "zroot is exported"
+      register: verification_result
+
+    - name: Display verification results
+      ansible.builtin.debug:
+        var: verification_result.stdout_lines
+
+    - name: Reboot!
+      ansible.builtin.command:
+        cmd: reboot
+      ignore_errors: yes 
