@@ -27,7 +27,7 @@ There are several playbooks that are in use due to the way arch-chroot works.
 
 __stage1.yaml__: this playbook is to be run at the prompt when you first boot arch ISO. This playbook installs the ZFS modules and partitions the disk according to the [recommended](https://wiki.archlinux.org/title/Install_Arch_Linux_on_ZFS#Partition_scheme) parition scheme on the arch wiki. YOU NEED TO SET THE DEVICE NAME. efi_partition and zfs_partition are populated later in the playbook based off the partition scheme and device name. This playbook is using the `linux-lts` kernel
 
-wrapper.sh: This is a wrapper that installs the aur ansible module and then kicks off the playbook. Without this, the playbook would install the module, but then bail as ansible cannot install and then use the new module in the same playbook
+__wrapper.sh__: This is a wrapper that installs the aur ansible module and then kicks off the playbook. Without this, the playbook would install the module, but then bail as ansible cannot install and then use the new module in the same playbook
 
 __stage2.yaml__: This playbook performs a lot of tasks
 * removes everthing except for the `/boot/EFI` parition from `/etc/fstab`
@@ -42,5 +42,7 @@ __stage2.yaml__: This playbook performs a lot of tasks
 * configures ZFSBootMenu and adds it with `efibootmgr`
 * optionally installs flatpaks and various nvidia drivers
 * optionally installs a desktop
+
 __cinnamon.yaml__: Installs some applications and the cinnamon desktop and then enables lightdm
+
 __final_stage.yaml__: This umounts the drive and exports the zpool before rebooting
