@@ -120,7 +120,7 @@
 
 - name: clear out gnupg directory
   ansible.builtin.file:
-    path: /home/{{ username }}
+    path: /home/{{ username }}/.gnupg/
     state: absent
 
 - name: extract gpg/ssh tarball
