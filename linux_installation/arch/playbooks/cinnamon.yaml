@@ -20,3 +20,27 @@
     enabled: yes
   loop:
     - lightdm
+
+- name: Create lightdm service directory and configuration files
+  block:
+    - name: Ensure lightdm service directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/lightdm.service.d
+        state: directory
+        mode: '0755'
+
+    - name: Create delay.conf file
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/lightdm.service.d/delay.conf
+        content: |
+          [Service]
+          ExecStartPre=/bin/sleep 5
+        mode: '0644'
+
+    - name: Create override.conf file
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/lightdm.service.d/override.conf
+        content: |
+          [Unit]
+          After=multi-user.target
+        mode: '0644'

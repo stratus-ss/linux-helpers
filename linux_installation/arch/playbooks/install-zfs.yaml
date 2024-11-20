@@ -148,6 +148,7 @@
       - openssh
       - wget
       - less
+      - rsync
     state: present
     update_cache: true
 
