@@ -18,3 +18,4 @@
         enable_endeavour: true
         update_fstab: true
         device_name: "/dev/sda"
+        sudoers_suspend_no_passwd: true

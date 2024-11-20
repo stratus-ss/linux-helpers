@@ -18,6 +18,12 @@
       - beeper
       - spideroak-one
       - firefox
+      - steam-devices
+      - gnome-online-accounts
+      - gnome-calendar
+      - yt-dlp
+      - gnome-disk-utility
+      - mlocate
     state: present
 
 - name: update the firefox icon
@@ -69,19 +75,52 @@
   when:
     - update_fstab | bool
 
-- name: update fstab
-  lineinfile:
+- name: Ensure fstab entries
+  ansible.builtin.lineinfile:
     path: /etc/fstab
     line: "{{ item }}"
     state: present
   loop:
-    - "192.168.1.1:/storage/backups/desktop_mounts/stratus_Downloads   /home/stratus/Downloads  nfs  noauto,x-systemd.automount,x-systemd.device-timeout=10,timeo=05,nofail 0 0"
-    - "192.168.1.1:/storage/backups/pacman_cache   /var/cache/pacman/pkg/  nfs  noauto,x-systemd.automount,x-systemd.device-timeout=10,timeo=05,nofail 0 0"
+    - "192.168.1.1:/storage/backups/desktop_mounts/stratus_Downloads   /home/stratus/Downloads  nfs  x-systemd.requires=zfs-mount.service,x-systemd.automount,x-systemd.device-timeout=10,timeo=05,nofail 0 0"
+    - "192.168.1.1:/storage/backups/pacman_cache   /var/cache/pacman/pkg/  nfs  x-systemd.requires=zfs-mount.service,x-systemd.automount,x-systemd.device-timeout=10,timeo=05,nofail 0 0"
     - "/dev/disk/by-id/ata-ST4000DM004-2CV104_ZFN2RDWQ-part1  /blu_rays  xfs  defaults,nofail 0 2"
-    - "/blu_rays/stratus_home_dir/Documents/ /home/stratus/Documents   none bind"
+    - "/blu_rays/stratus_home_dir/Documents/ /home/stratus/Documents   none x-systemd.requires=zfs-mount.service,bind"
     - "/blu_rays/swapfile swap swap defaults,nofail 0 0"
-    - "/dev/disk/by-id/ata-SPCC_Solid_State_Disk_AA000000000000001885-part1 /home/stratus/OBS xfs defaults,rw,noatime,discard 0 0"
-    - "/dev/disk/by-id/nvme-Samsung_SSD_970_EVO_1TB_S5H9NS0N808837D-part1 /1TB_nvme xfs  rw,relatime,attr2,inode64,logbufs=8,logbsize=32k,noquota,nofail,noatime        0 1"
-    - "/1TB_nvme/Steam/ /home/stratus/Games none bind"
+    - "/dev/disk/by-id/ata-SPCC_Solid_State_Disk_AA000000000000001885-part1 /home/stratus/OBS xfs x-systemd.requires=zfs-mount.service,defaults,rw,noatime,discard 0 0"
+    - "/dev/disk/by-id/nvme-Samsung_SSD_970_EVO_1TB_S5H9NS0N808837D-part1 /1TB_nvme xfs  x-systemd.requires=zfs-mount.service,rw,relatime,attr2,inode64,logbufs=8,logbsize=32k,noquota,nofail,noatime        0 1"
+    - "/1TB_nvme/Steam/ /home/stratus/Games/Steam none x-systemd.requires=zfs-mount.service,bind"
+    - "/big_space/Steam/ /home/stratus/Games/Steam2 none x-systemd.requires=zfs-mount.service,bind"
   when:
     - update_fstab | bool
+
+- name: Allow stratus to use systemctl suspend without password
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers
+    line: 'stratus ALL=(ALL) NOPASSWD: /bin/systemctl suspend'
+    validate: '/usr/sbin/visudo -cf %s'
+    state: present
+  when:
+    - sudoers_suspend_no_passwd | bool
+
+- name: fetch flatpak settings
+  ansible.builtin.get_url:
+    url: http://192.168.1.1/gpg_ssh_keys.tar.gz
+    dest: /tmp/
+    mode: '0664'
+
+- name: extract gpg/ssh tarball
+  ansible.builtin.unarchive:
+    src: /tmp/gpg_ssh_keys.tar.gz
+    dest: /home/stratus/
+    owner: stratus
+- name: fetch flatpak settings
+  ansible.builtin.get_url:
+    url: http://192.168.1.1/vpns.tar.gz
+    dest: /tmp/
+    mode: '0664'
+
+- name: extract gpg/ssh tarball
+  ansible.builtin.unarchive:
+    src: /tmp/vpns.tar.gz
+    dest: /etc/NetworkManager/system-connections/
+    owner: root
