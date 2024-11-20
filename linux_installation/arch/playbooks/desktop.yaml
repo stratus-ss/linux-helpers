@@ -93,10 +93,10 @@
   when:
     - update_fstab | bool
 
-- name: Allow stratus to use systemctl suspend without password
+- name: Allow {{ username }} to use systemctl suspend without password
   ansible.builtin.lineinfile:
     path: /etc/sudoers
-    line: 'stratus ALL=(ALL) NOPASSWD: /bin/systemctl suspend'
+    line: '{{ username }} ALL=(ALL) NOPASSWD: /bin/systemctl suspend'
     validate: '/usr/sbin/visudo -cf %s'
     state: present
   when:
@@ -108,11 +108,17 @@
     dest: /tmp/
     mode: '0664'
 
+- name: clear out gnupg directory
+  ansible.builtin.file:
+    path: /home/{{ username }}
+    state: absent
+
 - name: extract gpg/ssh tarball
   ansible.builtin.unarchive:
     src: /tmp/gpg_ssh_keys.tar.gz
-    dest: /home/stratus/
-    owner: stratus
+    dest: /home/{{ username }}/
+    owner: "{{ username }}"
+
 - name: fetch flatpak settings
   ansible.builtin.get_url:
     url: http://192.168.1.1/vpns.tar.gz

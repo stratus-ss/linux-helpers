@@ -133,7 +133,7 @@
       command: pacstrap /mnt linux-lts base base-devel intel-ucode nano nfs-utils ansible python-passlib
 
     - name: Generate fstab
-      shell: genfstab -U /mnt >> /mnt/etc/fstab
+      shell: genfstab -U /mnt |grep -v nfs >> /mnt/etc/fstab
 
     - name: Update the mirrorlist
       shell: reflector > /mnt/etc/pacman.d/mirrorlist
@@ -144,3 +144,11 @@
         regexp: '^enable_endeavour.*$'
         line: '        device_name: "{{ device_name }}"'
         insertafter: '\n'
+
+    - name: Copy playbook files to /mnt/mnt
+      ansible.builtin.copy:
+        src: /root/linux-helpers/linux_installation/arch/playbooks/
+        dest: /mnt/mnt
+        owner: root
+        group: root
+        mode: '0644'
