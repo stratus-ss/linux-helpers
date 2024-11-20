@@ -33,7 +33,7 @@
     path: /home/{{ username }}
     state: directory
     owner: "{{ username }}"
-    group: "{{ username }}
+    group: "{{ username }}"
     mode: '0700'
 
 - name: update the firefox icon
