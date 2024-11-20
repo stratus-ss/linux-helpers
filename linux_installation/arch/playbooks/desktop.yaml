@@ -24,7 +24,17 @@
       - yt-dlp
       - gnome-disk-utility
       - mlocate
+      - brscan5
+      - simple-scan
     state: present
+
+- name: Ensure {{ username }} home directory exists
+  ansible.builtin.file:
+    path: /home/{{ username }}
+    state: directory
+    owner: "{{ username }}"
+    group: "{{ username }}
+    mode: '0700'
 
 - name: update the firefox icon
   block:
