@@ -1,0 +1,20 @@
+[/]
+custom-list=['custom0', 'custom1']
+looking-glass-keybinding=@as []
+
+[custom-keybindings/custom0]
+binding=['<Primary><Shift><Alt>i']
+command='terminator'
+name='Terminator'
+
+[custom-keybindings/custom1]
+binding=['<Primary><Shift><Alt>p']
+command='flameshot gui'
+name='Flameshot'
+
+[media-keys]
+screensaver=['<Super>l', 'XF86ScreenSaver']
+suspend=['XF86Sleep', '<Primary><Alt>l']
+
+[wm]
+switch-to-workspace-down=['<Control><Alt>Down', 'Super_L']

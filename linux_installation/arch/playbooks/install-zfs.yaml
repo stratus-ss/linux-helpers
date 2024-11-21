@@ -1,123 +1,4 @@
-- name: Remove all lines from /etc/fstab except /boot/EFI mount
-  ansible.builtin.lineinfile:
-    path: /etc/fstab
-    regexp: '^(?!.*\s/boot/EFI\s).*$'
-    state: absent
 
-- name: Create user
-  user:
-    name: "{{ username }}"
-    password: "{{ user_password | password_hash('sha512') }}"
-    groups: users,sys,adm,log,scanner,power,rfkill,video,storage,optical,lp,audio,wheel
-    append: yes
-    create_home: yes
-
-- name: Enable wheel group in sudoers
-  lineinfile:
-    path: /etc/sudoers
-    regexp: '^#\s*%wheel\s+ALL=\(ALL:ALL\)'
-    line: '%wheel ALL=(ALL) NOPASSWD: ALL'
-    validate: '/usr/sbin/visudo -cf %s'
-    firstmatch: yes
-
-- name: Generate locale
-  command: locale-gen
-
-- name: Set locale
-  copy:
-    content: "LANG=en_US.UTF-8"
-    dest: /etc/locale.conf
-
-- name: Set environment variable
-  shell: export LANG=en_US.UTF-8
-
-- name: Mount NFS share
-  mount:
-    path: /var/cache/pacman/pkg
-    src: "{{ nfs_path }}"
-    fstype: nfs
-    state: mounted
-  when:
-    - network_pacman_cache | bool
-
-- name: Copy pacman package
-  copy:
-    src: /var/cache/pacman/pkg/pacman-6.1.0.33-x86_64.pkg.tar.zst
-    dest: /tmp/
-    remote_src: yes
-  when:
-    - network_pacman_cache | bool
-
-- name: Unmount NFS share
-  mount:
-    path: /var/cache/pacman/pkg
-    state: unmounted
-  when:
-    - network_pacman_cache | bool
-
-- name: Install pacman package
-  command: pacman -U /tmp/pacman-6.1.0.33-x86_64.pkg.tar.zst --noconfirm
-  when:
-    - network_pacman_cache | bool
-
-- name: Remount NFS share
-  mount:
-    path: /var/cache/pacman/pkg
-    src: "{{ nfs_path }}"
-    fstype: nfs
-    state: mounted
-  when:
-    - network_pacman_cache | bool
-
-- name: Update makepkg.conf
-  lineinfile:
-    path: /etc/makepkg.conf
-    regexp: "{{ item.regexp }}"
-    line: "{{ item.line }}"
-  loop:
-    - { regexp: '^RUSTFLAGS=', line: 'RUSTFLAGS="-C opt-level=2 -C target-cpu=native"' }
-    - { regexp: '^MAKEFLAGS=', line: 'MAKEFLAGS="-j$(nproc)"' }
-    - { regexp: '^COMPRESSZST=', line: 'COMPRESSZST=(zstd -c -z -q --threads=0 -)' }
-    - { regexp: '^COMPRESSXZ=', line: 'COMPRESSXZ=(xz -c -z --threads=0 -)' }
-    - { regexp: '^#?PKGDEST=', line: 'PKGDEST=/var/cache/pacman/pkg' }
-
-- name: Install base-devel and git
-  pacman:
-    name:
-      - base-devel
-      - git
-    state: present
-
-- name: Clone yay repository
-  git:
-    repo: https://aur.archlinux.org/yay.git
-    dest: /home/{{ username }}/yay
-  become: yes
-  become_user: "{{ username }}"
-
-- name: Build and install yay
-  command: makepkg -si --noconfirm
-  args:
-    chdir: /home/{{ username }}/yay
-  become: yes
-  become_user: "{{ username }}"
-
-- name: Ensure yay is in PATH
-  lineinfile:
-    path: /home/{{ username }}/.bashrc
-    line: 'export PATH=$PATH:/home/{{ username }}/.local/bin'
-    state: present
-  become: yes
-  become_user: "{{ username }}"
-
-- name: Update mkinitcpio.conf
-  lineinfile:
-    path: /etc/mkinitcpio.conf
-    regexp: "{{ item.regexp }}"
-    line: "{{ item.line }}"
-  loop:
-    - { regexp: '^MODULES=', line: 'MODULES=(zfs)' }
-    - { regexp: '^HOOKS=', line: 'HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block zfs filesystems)' }
 
 - name: Ensure [core-testing] section and Include line are uncommented in pacman.conf
   ansible.builtin.blockinfile:
@@ -128,7 +9,7 @@
     marker: "# {mark} ANSIBLE MANAGED BLOCK FOR CORE-TESTING"
     insertbefore: '^\[core\]'
 
-- name: Install AUR packages
+- name: Install ZFS packages
   become: yes
   become_user: "{{ username }}"
   kewlfft.aur.aur:
@@ -161,49 +42,11 @@
     marker: "# {mark} ANSIBLE MANAGED BLOCK FOR CORE-TESTING"
     insertbefore: '^\[core\]'
 
-- name: Update EndeavourOS mirrorlist
+- name: Ensure sanoid config is in place
   copy:
-    content: |
-      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      # EndeavourOS mirrorlist, ranked by eos-rankmirrors at 11/14/24 17:34:47.
-      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      Server = https://mirrors.gigenet.com/endeavouros/repo/$repo/$arch
-      Server = https://mirror.moson.org/endeavouros/repo/$repo/$arch
-      Server = https://repo.c48.uk/endeavouros/repo/$repo/$arch
-      Server = https://mirror.alpix.eu/endeavouros/repo/$repo/$arch
-      Server = https://md.mirrors.hacktegic.com/endeavouros/repo/$repo/$arch
-      Server = https://ftp.belnet.be/mirror/endeavouros/repo/$repo/$arch
-    dest: /etc/pacman.d/endeavouros-mirrorlist
-  when:
-    - enable_endeavour | bool
-
-- name: Update pacman.conf for endeavour keyring
-  blockinfile:
-    path: /etc/pacman.conf
-    block: |
-      [endeavouros]
-      SigLevel = Never
-      Include = /etc/pacman.d/endeavouros-mirrorlist
-  when:
-    - enable_endeavour | bool
-
-- name: Install EndeavourOS keyring
-  pacman:
-    name: endeavouros-keyring
-    state: present
-    update_cache: true
-  when:
-    - enable_endeavour | bool
-
-- name: Update pacman.conf
-  blockinfile:
-    path: /etc/pacman.conf
-    block: |
-      [endeavouros]
-      SigLevel = PackageRequired
-      Include = /etc/pacman.d/endeavouros-mirrorlist
-  when:
-    - enable_endeavour | bool
+    src: /mnt/configs/sanoid.conf
+    dest: "/etc/sanoid/sanoid.conf"
+    mode: '0644'
 
 - name: Enable systemd services
   systemd:
@@ -219,13 +62,6 @@
     - NetworkManager
     - sshd
     - sanoid.timer
-
-- name: Set timezone
-  file:
-    src: /usr/share/zoneinfo/America/Chicago
-    dest: /etc/localtime
-    state: link
-    force: yes
 
 - name: Configure ZFSBootMenu
   copy:
@@ -259,9 +95,6 @@
 - name: Set ZFS property
   command: zfs set org.zfsbootmenu:commandline="rw" zroot/ROOT
 
-- name: Create EFI boot entry
-  command: efibootmgr --create --disk {{ device_name }} --part 1 --label "ZFSBootMenu LTS" --loader '\EFI\zbm\vmlinuz-linux-lts.EFI' --unicode
-
 - name: Ensure there is no hostid
   file:
     path: /etc/hostid
@@ -273,92 +106,6 @@
 - name: Regenerate initramfs
   command: mkinitcpio -P
 
-- name: Install Flatpaks
-  become: yes
-  become_user: "{{ username }}"
-  kewlfft.aur.aur:
-    use: yay
-    name:
-      - flatpak
-      - flatseal
-    state: present
-  when:
-    - desktop | bool
-    - flatpak | bool
-
-- name: Install Nvidia Open
-  become: yes
-  become_user: "{{ username }}"
-  kewlfft.aur.aur:
-    use: yay
-    name:
-      - nvidia-open-dkms
-      - nvidia-settings
-    state: present
-  when:
-    - desktop | bool
-    - nvidia_open | bool
-
-- name: Install Nvidia LTS
-  become: yes
-  become_user: "{{ username }}"
-  kewlfft.aur.aur:
-    use: yay
-    name:
-      - nvidia-lts
-      - nvidia-settings
-    state: present
-  when:
-    - desktop | bool
-    - nvidia_lts | bool
-
-- name: Install Nvidia DKMS
-  become: yes
-  become_user: "{{ username }}"
-  kewlfft.aur.aur:
-    use: yay
-    name:
-      - nvidia-dkms
-      - nvidia-settings
-    state: present
-  when:
-    - desktop | bool
-    - nvidia_dkms | bool
-
-- name: Install DE independent packages
-  include_tasks: desktop.yaml
-  when:
-    - desktop | bool
-
-- name: Include Cinnamon tasks
-  include_tasks: cinnamon.yaml
-  when:
-    - desktop | bool
-    - desktop_name == "cinnamon"
-
-- name: Include GNOME tasks
-  include_tasks: gnome.yaml
-  when:
-    - desktop | bool
-    - desktop_name == "gnome"
-
-- name: Include KDE tasks
-  include_tasks: kde.yaml
-  when:
-    - desktop | bool
-    - desktop_name == "kde"
-
-- name: Require wheel password in sudoers
-  lineinfile:
-    path: /etc/sudoers
-    regexp: '^%wheel\s+ALL=\(ALL\)\s+NOPASSWD:\s+ALL'
-    line: '%wheel ALL=(ALL:ALL) ALL'
-    validate: '/usr/sbin/visudo -cf %s'
-
-- name: Unmount NFS share final
-  mount:
-    path: /var/cache/pacman/pkg
-    state: unmounted
 
 - name: Update IgnorePkg line in pacman.conf
   lineinfile:
@@ -366,3 +113,4 @@
     regexp: '^#?IgnorePkg.*'
     line: 'IgnorePkg   = pacman linux-lts nvidia-lts zfs-linux-lts openssh'
     state: present
+

@@ -3,18 +3,19 @@
   hosts: localhost
   become: true
   tasks:
-    - include_tasks: install-zfs.yaml
+    - include_tasks: system-setup.yaml
       vars:
         username: ''
         user_password: ''
         desktop: true
         desktop_name: cinnamon
-        nvidia_open: true
+        nvidia_open: false
         nvidia_dkms: false
-        nvidia_lts: false
+        nvidia_lts: true
         flatpak: true
         network_pacman_cache: true
-        nfs_path: '192.168.1.1:/storage/backups/pacman_cache'
+        remote_server: 192.168.1.1
+        nfs_path: '{{ remote_server }}:/storage/backups/pacman_cache'
         enable_endeavour: true
         update_fstab: true
         device_name: "/dev/sda"

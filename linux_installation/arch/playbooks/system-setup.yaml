@@ -1,0 +1,154 @@
+- name: Remove all lines from /etc/fstab except /boot/EFI mount
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^(?!.*\s/boot/EFI\s).*$'
+    state: absent
+
+- name: Create user
+  user:
+    name: "{{ username }}"
+    password: "{{ user_password | password_hash('sha512') }}"
+    groups: users,sys,adm,log,scanner,power,rfkill,video,storage,optical,lp,audio,wheel
+    append: yes
+    create_home: yes
+
+- name: Enable wheel group in sudoers
+  lineinfile:
+    path: /etc/sudoers
+    regexp: '^#\s*%wheel\s+ALL=\(ALL:ALL\)'
+    line: '%wheel ALL=(ALL) NOPASSWD: ALL'
+    validate: '/usr/sbin/visudo -cf %s'
+    firstmatch: yes
+
+- name: Generate locale
+  command: locale-gen
+
+- name: Set locale
+  copy:
+    content: "LANG=en_US.UTF-8"
+    dest: /etc/locale.conf
+
+- name: Set environment variable
+  shell: export LANG=en_US.UTF-8
+
+- name: Mount NFS share
+  mount:
+    path: /var/cache/pacman/pkg
+    src: "{{ nfs_path }}"
+    fstype: nfs
+    state: mounted
+  when:
+    - network_pacman_cache | bool
+
+- name: Copy pacman package
+  copy:
+    src: /var/cache/pacman/pkg/pacman-6.1.0.33-x86_64.pkg.tar.zst
+    dest: /tmp/
+    remote_src: yes
+  when:
+    - network_pacman_cache | bool
+
+- name: Unmount NFS share
+  mount:
+    path: /var/cache/pacman/pkg
+    state: unmounted
+  when:
+    - network_pacman_cache | bool
+
+- name: Install pacman package
+  command: pacman -U /tmp/pacman-6.1.0.33-x86_64.pkg.tar.zst --noconfirm
+  when:
+    - network_pacman_cache | bool
+
+- name: Remount NFS share
+  mount:
+    path: /var/cache/pacman/pkg
+    src: "{{ nfs_path }}"
+    fstype: nfs
+    state: mounted
+  when:
+    - network_pacman_cache | bool
+
+- name: Update makepkg.conf
+  lineinfile:
+    path: /etc/makepkg.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^RUSTFLAGS=', line: 'RUSTFLAGS="-C opt-level=2 -C target-cpu=native"' }
+    - { regexp: '^MAKEFLAGS=', line: 'MAKEFLAGS="-j$(nproc)"' }
+    - { regexp: '^COMPRESSZST=', line: 'COMPRESSZST=(zstd -c -z -q --threads=0 -)' }
+    - { regexp: '^COMPRESSXZ=', line: 'COMPRESSXZ=(xz -c -z --threads=0 -)' }
+    - { regexp: '^#?PKGDEST=', line: 'PKGDEST=/var/cache/pacman/pkg' }
+
+- name: Install base-devel and git
+  pacman:
+    name:
+      - base-devel
+      - git
+    state: present
+
+- name: Ensure correct ownership of user's home directory
+  ansible.builtin.file:
+    path: "/home/{{ username }}"
+    state: directory
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    recurse: yes
+
+- name: Clone yay repository
+  git:
+    repo: https://aur.archlinux.org/yay.git
+    dest: /home/{{ username }}/yay
+  become: yes
+  become_user: "{{ username }}"
+
+- name: Build and install yay
+  command: makepkg -si --noconfirm
+  args:
+    chdir: /home/{{ username }}/yay
+  become: yes
+  become_user: "{{ username }}"
+
+- name: Update mkinitcpio.conf
+  lineinfile:
+    path: /etc/mkinitcpio.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^MODULES=', line: 'MODULES=(zfs)' }
+    - { regexp: '^HOOKS=', line: 'HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block zfs filesystems)' }
+
+- name: Set timezone
+  file:
+    src: /usr/share/zoneinfo/America/Chicago
+    dest: /etc/localtime
+    state: link
+    force: yes
+
+- name: Generate en_US Locale
+  community.general.locale_gen:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - "en_US.UTF-8"
+
+- name: start zfs install
+  include_tasks: install-zfs.yaml
+
+- name: Install DE independent packages
+  include_tasks: desktop.yaml
+  when:
+    - desktop | bool
+
+- name: Unmount NFS share final
+  mount:
+    path: /var/cache/pacman/pkg
+    state: unmounted
+
+- name: Require wheel password in sudoers
+  lineinfile:
+    path: /etc/sudoers
+    regexp: '^%wheel\s+ALL=\(ALL\)\s+NOPASSWD:\s+ALL'
+    line: '%wheel ALL=(ALL:ALL) ALL'
+    validate: '/usr/sbin/visudo -cf %s'
