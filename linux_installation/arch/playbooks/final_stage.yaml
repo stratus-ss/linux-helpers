@@ -2,7 +2,12 @@
 - name: Unmount filesystems, export zpool, and reboot
   hosts: localhost
   become: true  # This ensures the playbook runs with root privileges
+  vars:
   tasks:
+    # This didn't seem to work inside arch-chroot
+    - name: Create EFI boot entry
+      command: efibootmgr --create --disk {{ device_name }} --part 1 --label "ZFSBootMenu LTS" --loader '\EFI\zbm\vmlinuz-linux-lts.EFI' --unicode
+
     - name: Unmount /mnt/boot/EFI
       ansible.posix.mount:
         path: /mnt/boot/EFI

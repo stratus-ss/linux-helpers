@@ -152,3 +152,10 @@
         owner: root
         group: root
         mode: '0644'
+
+    - name: update final_stage.yaml with device_name
+      ansible.builtin.lineinfile:
+        path: "{{ playbook_dir }}/final_stage.yaml"
+        regexp: '^vars.*$'
+        line: '    device_name: "{{ device_name }}"'
+        insertafter: 'vars:'

@@ -1,3 +1,47 @@
+- name: Update pacman.conf
+  blockinfile:
+    path: /etc/pacman.conf
+    block: |
+      [endeavouros]
+      SigLevel = PackageRequired
+      Include = /etc/pacman.d/endeavouros-mirrorlist
+  when:
+    - enable_endeavour | bool
+    
+- name: Update EndeavourOS mirrorlist
+  copy:
+    content: |
+      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      # EndeavourOS mirrorlist, ranked by eos-rankmirrors at 11/14/24 17:34:47.
+      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      Server = https://mirrors.gigenet.com/endeavouros/repo/$repo/$arch
+      Server = https://mirror.moson.org/endeavouros/repo/$repo/$arch
+      Server = https://repo.c48.uk/endeavouros/repo/$repo/$arch
+      Server = https://mirror.alpix.eu/endeavouros/repo/$repo/$arch
+      Server = https://md.mirrors.hacktegic.com/endeavouros/repo/$repo/$arch
+      Server = https://ftp.belnet.be/mirror/endeavouros/repo/$repo/$arch
+    dest: /etc/pacman.d/endeavouros-mirrorlist
+  when:
+    - enable_endeavour | bool
+
+- name: Update pacman.conf for endeavour keyring
+  blockinfile:
+    path: /etc/pacman.conf
+    block: |
+      [endeavouros]
+      SigLevel = Never
+      Include = /etc/pacman.d/endeavouros-mirrorlist
+  when:
+    - enable_endeavour | bool
+
+- name: Install EndeavourOS keyring
+  pacman:
+    name: endeavouros-keyring
+    state: present
+    update_cache: true
+  when:
+    - enable_endeavour | bool
+
 - name: Install Cinnamon packages
   become: yes
   become_user: "{{ username }}"
@@ -44,3 +88,16 @@
           [Unit]
           After=multi-user.target
         mode: '0644'
+
+- name: fetch autostart applications
+  ansible.builtin.get_url:
+    url: http://{{ remote_server }}/autostart.tar.gz
+    dest: /home/{{ username }}/.config
+    mode: '0664'
+
+- name: extract autostart tarball
+  ansible.builtin.unarchive:
+    src: /home/{{ username }}/.config/autostart.tar.gz
+    dest: /home/{{ username }}/.config/
+    owner: "{{ username }}"
+
