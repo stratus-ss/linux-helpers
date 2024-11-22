@@ -72,7 +72,7 @@
       - spideroak-one
       - firefox
       - steam-devices
-      - gnome-online-accounts
+      - gnome-online-accounts-gtk
       - gnome-calendar
       - yt-dlp
       - gnome-disk-utility
@@ -80,6 +80,7 @@
       - brscan5
       - simple-scan
       - virt-manager
+      - evince
     state: present
 
 - name: Ensure {{ username }} home directory exists
