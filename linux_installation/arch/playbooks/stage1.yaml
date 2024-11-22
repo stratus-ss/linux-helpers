@@ -3,7 +3,7 @@
   hosts: localhost
   become: yes
   vars:
-    device_name: "/dev/sda"  # User-specified device name
+    device_name: "/dev/xxx"  # User-specified device name
     efi_partition: ""
     zfs_partition: ""
     network_pacman_cache: true
@@ -13,7 +13,7 @@
     - name: Fail if device_name is not specified
       fail:
         msg: "Please specify the device_name variable (e.g., -e device_name=/dev/sda)"
-      when: device_name == ''
+      when: device_name == '/dev/xxx'
 
     - name: Install ZFS in the ArchISO
       ansible.builtin.shell: curl -s https://raw.githubusercontent.com/eoli3n/archiso-zfs/master/init | bash
