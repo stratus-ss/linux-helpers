@@ -1,3 +1,8 @@
+- name: Fail if device_name is not specified
+  fail:
+    msg: "Please specify the device_name variable (e.g., -e device_name=/dev/sda)"
+  when: device_name == '/dev/xxx'
+
 - name: Remove all lines from /etc/fstab except /boot/EFI mount
   ansible.builtin.lineinfile:
     path: /etc/fstab
