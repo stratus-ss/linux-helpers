@@ -15,21 +15,10 @@
   kewlfft.aur.aur:
     use: yay
     name:
-      - zfs-linux-lts
-      - networkmanager
-      - sudo
-      - grub
       - efibootmgr
-      - linux-firmware
-      - terminator
-      - linux-lts
-      - zfsbootmenu
       - sanoid
-      - libvirt
-      - openssh
-      - wget
-      - less
-      - rsync
+      - zfsbootmenu
+      - zfs-linux-lts
     state: present
     update_cache: true
 
@@ -53,16 +42,16 @@
     name: "{{ item }}"
     enabled: yes
   loop:
+    - NetworkManager
+    - sanoid.timer
+    - sshd
     - zfs-import-cache
     - zfs-import.target
     - zfs-mount
     - zfs-share
-    - zfs-zed
     - zfs.target
-    - NetworkManager
-    - sshd
-    - sanoid.timer
-
+    - zfs-zed
+    
 - name: Configure ZFSBootMenu
   copy:
     content: |
@@ -111,6 +100,6 @@
   lineinfile:
     path: /etc/pacman.conf
     regexp: '^#?IgnorePkg.*'
-    line: 'IgnorePkg   = pacman linux-lts nvidia-lts zfs-linux-lts openssh'
+    line: 'IgnorePkg   = pacman linux-lts linux-lts-headers nvidia-lts zfs-linux-lts openssh'
     state: present
 
