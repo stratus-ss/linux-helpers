@@ -19,7 +19,14 @@
         path: /mnt/home
         state: unmounted
       ignore_errors: yes  # In case it's already unmounted
-
+  
+    - name: Unmount pacman cache
+      ansible.posix.mount:
+        path: /mnt/var/cache/pacman/pkg
+        state: unmounted
+      ignore_errors: yes  # In case it's already unmounted
+    when: network_pacman_cache | bool
+    
     - name: Unmount /mnt
       ansible.posix.mount:
         path: /mnt

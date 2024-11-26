@@ -5,22 +5,25 @@
   tasks:
     - include_tasks: system-setup.yaml
       vars:
-        username: ''
-        user_password: ''
-        desktop: true
+        auto_start_app: true
+        custom_firefox_icon: true
         desktop_name: cinnamon
-        nvidia_open: false
+        desktop: true
+        device_name: /dev/xxx
+        enable_endeavour: true
+        flatpak: true
+        libvirt: true
+        network_pacman_cache: true
+        nfs_path: '{{ remote_server }}:/storage/backups/pacman_cache'
         nvidia_dkms: false
         nvidia_lts: true
-        flatpak: true
-        network_pacman_cache: true
+        nvidia_open: false
         remote_server: 192.168.1.1
-        nfs_path: '{{ remote_server }}:/storage/backups/pacman_cache'
-        enable_endeavour: true
-        update_fstab: true
-        device_name: "/dev/xxx"
-        sudoers_suspend_no_passwd: true
-        custom_firefox_icon: true
         restore_firefox_backup: true
         restore_user_cryptography: true
-        auto_start_app: true
+        sudoers_suspend_no_passwd: true
+        update_fstab: true
+        username: ''
+        user_password: ''
+
+

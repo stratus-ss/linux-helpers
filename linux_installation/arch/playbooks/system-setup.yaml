@@ -86,16 +86,12 @@
     - { regexp: '^COMPRESSXZ=', line: 'COMPRESSXZ=(xz -c -z --threads=0 -)' }
     - { regexp: '^#?PKGDEST=', line: 'PKGDEST=/var/cache/pacman/pkg' }
 
-- name: Install system default packages
+- name: Install system default packages 
   pacman:
     name:
       - base-devel
       - git
-      - grub
       - less
-      - libvirt
-      - qemu-full
-      - dnsmasq
       - linux-firmware
       - linux-lts
       - networkmanager
@@ -128,15 +124,6 @@
   become: yes
   become_user: "{{ username }}"
 
-- name: Update mkinitcpio.conf
-  lineinfile:
-    path: /etc/mkinitcpio.conf
-    regexp: "{{ item.regexp }}"
-    line: "{{ item.line }}"
-  loop:
-    - { regexp: '^MODULES=', line: 'MODULES=(zfs)' }
-    - { regexp: '^HOOKS=', line: 'HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block zfs filesystems)' }
-
 - name: Set timezone
   file:
     src: /usr/share/zoneinfo/America/Chicago
@@ -153,6 +140,15 @@
 
 - name: start zfs install
   include_tasks: install-zfs.yaml
+
+- name: install virtualization
+  pacman:
+    name:
+      - libvirt
+      - qemu-full
+      - dnsmasq
+    state: present
+  when: libvirt | bool
 
 - name: Install DE independent packages
   include_tasks: desktop.yaml
