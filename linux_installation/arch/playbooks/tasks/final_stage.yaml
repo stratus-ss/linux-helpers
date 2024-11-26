@@ -2,7 +2,8 @@
 - name: Unmount filesystems, export zpool, and reboot
   hosts: localhost
   become: true  # This ensures the playbook runs with root privileges
-  vars:
+  vars_files:
+    - ../vars.yaml
   tasks:
     # This didn't seem to work inside arch-chroot
     - name: Create EFI boot entry
