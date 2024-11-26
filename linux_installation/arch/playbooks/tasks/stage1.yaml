@@ -2,12 +2,8 @@
 - name: Configure ZFS on Arch Linux
   hosts: localhost
   become: yes
-  vars:
-    device_name: "/dev/xxx"  # User-specified device name
-    efi_partition: ""
-    zfs_partition: ""
-    network_pacman_cache: true
-    nfs_path: '192.168.1.1:/storage/backups/pacman_cache'
+  vars_files:
+    - ../vars.yaml
 
   tasks:
     - name: Fail if device_name is not specified
@@ -152,10 +148,3 @@
         owner: root
         group: root
         mode: '0644'
-
-    - name: update final_stage.yaml with device_name
-      ansible.builtin.lineinfile:
-        path: "{{ playbook_dir }}/final_stage.yaml"
-        regexp: '^vars.*$'
-        line: '    device_name: "{{ device_name }}"'
-        insertafter: 'vars:'

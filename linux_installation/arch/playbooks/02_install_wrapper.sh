@@ -1,2 +1,2 @@
 ansible-galaxy collection install kewlfft.aur
-time ansible-playbook -v stage2.yaml
+time ansible-playbook -v tasks/stage2.yaml

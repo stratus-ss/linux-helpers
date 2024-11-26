@@ -1,0 +1,11 @@
+---
+- name: Wrapper
+  hosts: localhost
+  become: true
+  tasks:
+    - include_tasks: system-setup.yaml
+      vars_files:
+        - ../vars.yaml
+
+
+
