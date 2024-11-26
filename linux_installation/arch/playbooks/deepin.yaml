@@ -6,25 +6,17 @@
       SigLevel = PackageRequired
       Include = /etc/pacman.d/endeavouros-mirrorlist
   when:
-    - enable_endeavour | bool
-    
-- name: Include Endeavour OS Repo
-  include_tasks: endeavour_repo.yaml
+    - enable_endeavour | bool    
 
-- name: Install Cinnamon packages
+- name: Install Deepin packages
   become: yes
   become_user: "{{ username }}"
   kewlfft.aur.aur:
     use: yay
     name:
-      - cinnamon
-      - lightdm
-      - lightdm-slick-greeter
-      - arc-gtk-theme-eos
-      - eos-lightdm-slick-theme
-      - eos-qogir-icons
-      - eos-settings-cinnamon
-      - cinnamon-sounds
+      - deepin
+      - deepin-kwin
+      - deepin-extra
     state: present
 
 - name: Enable systemd services
@@ -47,7 +39,7 @@
         dest: /etc/systemd/system/lightdm.service.d/delay.conf
         content: |
           [Service]
-          ExecStartPre=/bin/sleep 5
+          ExecStartPre=/bin/sleep 2
         mode: '0644'
 
     - name: Create override.conf file
@@ -73,3 +65,5 @@
         owner: "{{ username }}"
   when:
     - auto_start_app | bool
+
+

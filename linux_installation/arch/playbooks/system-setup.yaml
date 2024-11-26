@@ -86,11 +86,24 @@
     - { regexp: '^COMPRESSXZ=', line: 'COMPRESSXZ=(xz -c -z --threads=0 -)' }
     - { regexp: '^#?PKGDEST=', line: 'PKGDEST=/var/cache/pacman/pkg' }
 
-- name: Install base-devel and git
+- name: Install system default packages
   pacman:
     name:
       - base-devel
       - git
+      - grub
+      - less
+      - libvirt
+      - qemu-full
+      - dnsmasq
+      - linux-firmware
+      - linux-lts
+      - networkmanager
+      - openssh
+      - rsync
+      - sudo
+      - terminator
+      - wget
     state: present
 
 - name: Ensure correct ownership of user's home directory

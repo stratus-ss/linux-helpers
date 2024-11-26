@@ -96,6 +96,8 @@
     src: /mnt/configs/.bashrc
     dest: /home/{{ username }}/.bashrc
     remote_src: yes
+    owner: "{{ username }}"
+    group: "{{ username }}"
 
 - name: update the firefox icon
   block:
@@ -136,18 +138,23 @@
         path: "/home/{{ username }}/.local/share/applications/firefox.desktop"
         regexp: '^Icon=firefox$'
         line: 'Icon=/home/{{ username }}/.local/share/icons/Black-Firefox-icon.png'
+  when:
+    - custom_firefox_icon | bool
+- name: Restore firefox backup
+  block:
+    - name: fetch system firefox settings
+      ansible.builtin.get_url:
+        url: http://{{ remote_server }}/system_firefox.tar.gz
+        dest: /home/{{ username }}/system_firefox.tar.gz
+        mode: '0664'
 
-- name: fetch system firefox settings
-  ansible.builtin.get_url:
-    url: http://{{ remote_server }}/system_firefox.tar.gz
-    dest: /home/{{ username }}/system_firefox.tar.gz
-    mode: '0664'
-
-- name: extract system firefox settings tarball
-  ansible.builtin.unarchive:
-    src: /home/{{ username }}/system_firefox.tar.gz
-    dest: /home/{{ username }}/
-    owner: "{{ username }}"
+    - name: extract system firefox settings tarball
+      ansible.builtin.unarchive:
+        src: /home/{{ username }}/system_firefox.tar.gz
+        dest: /home/{{ username }}/
+        owner: "{{ username }}"
+  when:
+    - restore_firefox_backup | bool
 
 - name: Ensure mount point directories exist
   file:
@@ -193,43 +200,46 @@
     state: present
   when:
     - sudoers_suspend_no_passwd | bool
+- name: Restore user cryptography
+  block:
+    - name: fetch ssh/gpg keys settings
+      ansible.builtin.get_url:
+        url: http://{{ remote_server }}/gpg_ssh_keys.tar.gz
+        dest: /tmp/
+        mode: '0664'
 
-- name: fetch ssh/gpg keys settings
-  ansible.builtin.get_url:
-    url: http://{{ remote_server }}/gpg_ssh_keys.tar.gz
-    dest: /tmp/
-    mode: '0664'
+    - name: clear out gnupg directory
+      ansible.builtin.file:
+        path: /home/{{ username }}/.gnupg/
+        state: absent
 
-- name: clear out gnupg directory
-  ansible.builtin.file:
-    path: /home/{{ username }}/.gnupg/
-    state: absent
+    - name: extract gpg/ssh tarball
+      ansible.builtin.unarchive:
+        src: /tmp/gpg_ssh_keys.tar.gz
+        dest: /home/{{ username }}/
+        owner: "{{ username }}"
 
-- name: extract gpg/ssh tarball
-  ansible.builtin.unarchive:
-    src: /tmp/gpg_ssh_keys.tar.gz
-    dest: /home/{{ username }}/
-    owner: "{{ username }}"
+    - name: fetch vpn settings
+      ansible.builtin.get_url:
+        url: http://{{ remote_server }}/vpns.tar.gz
+        dest: /tmp/
+        mode: '0664'
 
-- name: fetch vpn settings
-  ansible.builtin.get_url:
-    url: http://{{ remote_server }}/vpns.tar.gz
-    dest: /tmp/
-    mode: '0664'
+    - name: Ensure /etc/NetworkManager/system-connections/ exists
+      ansible.builtin.file:
+        path: /etc/NetworkManager/system-connections/
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
 
-- name: Ensure /etc/NetworkManager/system-connections/ exists
-  ansible.builtin.file:
-    path: /etc/NetworkManager/system-connections/
-    state: directory
-    owner: root
-    group: root
-    mode: '0700'
-
-- name: extract gpg/ssh tarball
-  ansible.builtin.unarchive:
-    src: /tmp/vpns.tar.gz
-    dest: /etc/NetworkManager/system-connections/
-    owner: root
+    - name: extract gpg/ssh tarball
+      ansible.builtin.unarchive:
+        src: /tmp/vpns.tar.gz
+        dest: /etc/NetworkManager/system-connections/
+        owner: root
+  when:
+    - restore_ssh_gpg | bool
 
 - name: Include Cinnamon tasks
   include_tasks: cinnamon.yaml
@@ -248,3 +258,9 @@
   when:
     - desktop | bool
     - desktop_name == "kde"
+
+- name: Include Deepin tasks
+  include_tasks: deepin.yaml
+    when:
+    - desktop | bool
+    - desktop_name == "deepin"
