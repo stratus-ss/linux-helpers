@@ -239,7 +239,7 @@
         dest: /etc/NetworkManager/system-connections/
         owner: root
   when:
-    - restore_ssh_gpg | bool
+    - restore_user_cryptography | bool
 
 - name: Include Cinnamon tasks
   include_tasks: cinnamon.yaml
@@ -261,6 +261,6 @@
 
 - name: Include Deepin tasks
   include_tasks: deepin.yaml
-    when:
+  when:
     - desktop | bool
     - desktop_name == "deepin"
