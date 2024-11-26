@@ -1,13 +1,3 @@
-- name: Update pacman.conf
-  blockinfile:
-    path: /etc/pacman.conf
-    block: |
-      [endeavouros]
-      SigLevel = PackageRequired
-      Include = /etc/pacman.d/endeavouros-mirrorlist
-  when:
-    - enable_endeavour | bool    
-
 - name: Install Deepin packages
   become: yes
   become_user: "{{ username }}"
@@ -16,7 +6,22 @@
     name:
       - deepin
       - deepin-kwin
-      - deepin-extra
+      - deepin-album
+      - deepin-calculator
+      - deepin-camera
+      - deepin-clipboard
+      - deepin-community-wallpapers
+      - deepin-compressor
+      - deepin-device-formatter
+      - deepin-editor
+      - deepin-font-manager
+      - deepin-grand-search
+      - deepin-movie
+      - deepin-music
+      - deepin-picker
+      - deepin-printer
+      - deepin-screen-recorder
+      - deepin-screensaver-pp
     state: present
 
 - name: Enable systemd services
