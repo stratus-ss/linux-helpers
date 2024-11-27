@@ -90,7 +90,9 @@
   pacman:
     name:
       - base-devel
+      - ethtool
       - git
+      - inxi
       - less
       - linux-firmware
       - linux-lts
@@ -150,6 +152,13 @@
     state: present
   when: libvirt | bool
 
+
+- name: Add virtualization groups
+  user:
+    name: "{{ username }}"
+    groups: libvirt,libvirt-qemu,kvm
+  when: libvirt | bool
+
 - name: Install DE independent packages
   include_tasks: desktop.yaml
   when:
@@ -165,4 +174,31 @@
     path: /etc/sudoers
     regexp: '^%wheel\s+ALL=\(ALL\)\s+NOPASSWD:\s+ALL'
     line: '%wheel ALL=(ALL:ALL) ALL'
-    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Add sudoers rule for systemctl suspend
+  community.general.sudoers:
+    name: "{{ username }}_suspend"
+    user: "{{ username }}"
+    commands: 
+      - /bin/systemctl suspend
+    nopassword: true
+    state: present
+
+- name: Add sudoers rule for zfs snapshots
+  community.general.sudoers:
+    name: "{{ username }}_zfs_snapshots"
+    user: "{{ username }}"
+    commands: 
+      - /usr/bin/zfs list -t snapshot
+    nopassword: true
+    state: present
+
+- name: Add sudoers rule for eject
+  community.general.sudoers:
+    name: "{{ username }}_eject"
+    user: "{{ username }}"
+    commands: 
+      - /usr/bin/eject
+      - /usr/bin/eject -t
+    nopassword: true
+    state: present

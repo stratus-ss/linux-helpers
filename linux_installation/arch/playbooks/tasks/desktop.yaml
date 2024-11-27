@@ -72,6 +72,7 @@
       - gvfs
       - gvfs-nfs
       - gvfs-smb
+      - makemkv
       - mlocate
       - openaudible-bin
       - simple-scan
@@ -84,6 +85,13 @@
       - xdg-user-dirs-gtk
       - yt-dlp
     state: present
+
+- name: Ensure a/dev/sg* exists
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/sg.conf
+    content: |
+      sg
+    mode: 0644
 
 - name: Ensure {{ username }} home directory exists
   ansible.builtin.file:
@@ -239,6 +247,16 @@
         owner: root
   when:
     - restore_user_cryptography | bool
+
+- name: Add sudoers rule for eject
+  community.general.sudoers:
+    name: "{{ username }}_eject"
+    user: "{{ username }}"
+    commands: 
+      - /usr/bin/eject
+      - /usr/bin/eject -t
+    nopassword: true
+    state: present
 
 - name: Enable systemd services
   systemd:
