@@ -193,12 +193,4 @@
     nopassword: true
     state: present
 
-- name: Add sudoers rule for eject
-  community.general.sudoers:
-    name: "{{ username }}_eject"
-    user: "{{ username }}"
-    commands: 
-      - /usr/bin/eject
-      - /usr/bin/eject -t
-    nopassword: true
-    state: present
+
