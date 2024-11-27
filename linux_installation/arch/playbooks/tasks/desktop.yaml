@@ -76,7 +76,8 @@
       - openaudible-bin
       - simple-scan
       - spideroak-one
-      - steam-devices
+      - steam
+      - system-config-printer
       - terminator
       - ulauncher
       - virt-manager
