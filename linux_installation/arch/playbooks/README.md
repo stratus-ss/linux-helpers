@@ -45,9 +45,12 @@ __system-setup.yaml__: This sets up the base OS install including:
 * updates makepkg.conf with some 'optimized' compiler flags
 * installs `yay`
 * edits mkinitcpio.conf for ZFS
+* it calls `install-zfs.yaml`
+* it optionally installs libvirt
 * it calls the `desktop.yaml` if set to true in the vars
 
 __install-zfs.yaml__:
+* installs zfs-linux-linux and efibootmgr
 * enables systemd services
 * configures ZFSBootMenu
 * installs and configures sanoid for auto-snapshotting
@@ -59,7 +62,7 @@ __install-zfs.yaml__:
 * optionally installs flatpaks and various nvidia drivers
 * optionally installs a desktop
 
-__desktop.yaml__: Installs generic packages for use with all desktops (firefox, flameshot etc).
+__desktop.yaml__: Installs generic packages for use with all desktops (firefox, flameshot, steam etc).
 * Installs nvidia driver if applicable
 * sets a new firefox icon
 * gets the `.mozilla` file from a remote webserver and puts it inplace
@@ -73,7 +76,10 @@ __cinnamon.yaml__: Installs some applications and the cinnamon desktop and then 
 * adds lightdm delay and override. Sometimes lightdm starts to fast causing breakage on boot and on resume
 * adds autostart entries
 
+__deepin.yaml__: Installs `deepin`, `deepin-kwin` and some, but not all of the deepin-extras meta package
+* CURRENTLY Broken in testing. Xorg crashes back to login on deepin. Cinnamon logs in fine.
+
 __final_stage.yaml__: This umounts the drive and exports the zpool before rebooting
 * adds efi boot entry
-* unmounts the drives from `/mnt`
+* unmounts all the drives from `/mnt`
 * reboots the host
