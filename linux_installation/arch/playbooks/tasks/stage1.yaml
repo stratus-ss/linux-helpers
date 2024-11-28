@@ -133,14 +133,7 @@
 
     - name: Update the mirrorlist
       shell: reflector > /mnt/etc/pacman.d/mirrorlist
-
-    - name: update install-zfs.yaml with device_name
-      ansible.builtin.lineinfile:
-        path: "{{ playbook_dir }}/stage2.yaml"
-        regexp: '^enable_endeavour.*$'
-        line: '        device_name: "{{ device_name }}"'
-        insertafter: '\n'
-
+      
     - name: Copy playbook files to /mnt/mnt
       ansible.builtin.copy:
         src: /root/linux-helpers/linux_installation/arch/playbooks/
