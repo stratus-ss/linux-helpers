@@ -152,11 +152,10 @@
     state: present
   when: libvirt | bool
 
-
 - name: Add virtualization groups
   user:
     name: "{{ username }}"
-    groups: libvirt,libvirt-qemu,kvm
+    groups: users,sys,adm,log,scanner,power,rfkill,video,storage,optical,lp,audio,wheel,libvirt,libvirt-qemu,kvm
   when: libvirt | bool
 
 - name: Install DE independent packages
@@ -195,4 +194,27 @@
     nopassword: true
     state: present
 
+- name: Set Storage to persistent in journald.conf
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/journald.conf
+    regexp: '^#?Storage='
+    line: 'Storage=persistent'
+  when: 
+    - journald_on_zfs | bool
+- name: Create systemd override directory for journald
+  ansible.builtin.file:
+    path: /etc/systemd/system/systemd-journald.service.d
+    state: directory
+    mode: '0755'
+  when: 
+    - journald_on_zfs | bool
+- name: Create override file for journald
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/systemd-journald.service.d/override.conf
+    content: |
+      [Unit]
+      After=zfs-mount.service
+    mode: '0644'
+  when: 
+    - journald_on_zfs | bool
 
