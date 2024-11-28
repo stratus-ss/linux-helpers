@@ -7,14 +7,22 @@ panels-autohide=['1:intel']
 panels-enabled=['1:0:top']
 panels-height=['1:40']
 
+[desktop/applications/calculator]
+exec='gnome-calculator'
+
+[desktop/applications/terminal]
+exec='terminator'
+exec-arg='--'
+
 [desktop/interface]
 cursor-blink-time=1200
-font-name='Sans 11'
+font-name='Sans 12'
 text-scaling-factor=1.0
 toolkit-accessibility=false
 
 [desktop/keybindings]
-custom-list=['custom0', 'custom1']
+custom-list=['custom0', 'custom1', 'custom2']
+looking-glass-keybinding=@as []
 
 [desktop/keybindings/custom-keybindings/custom0]
 binding=['<Primary><Shift><Alt>i']
@@ -26,10 +34,21 @@ binding=['<Primary><Shift><Alt>p']
 command='flameshot gui'
 name='Flameshot'
 
+[desktop/keybindings/custom-keybindings/custom2]
+binding=['<Primary><Shift><Alt>l']
+command='cinnamon-session-quit --no-prompt'
+name='Logout Now'
+
+[desktop/keybindings/media-keys]
+logout=['<Control><Alt>Delete']
+screensaver=['<Super>l', 'XF86ScreenSaver']
+suspend=['XF86Sleep', '<Primary><Alt>l']
+
 [desktop/keybindings/wm]
 switch-to-workspace-down=['<Control><Alt>Down', 'Super_L']
 
 [desktop/media-handling]
+autorun-never=false
 autorun-x-content-ignore=@as []
 autorun-x-content-open-folder=@as []
 autorun-x-content-start-app=['x-content/unix-software']
@@ -41,7 +60,11 @@ repeat-interval=uint32 30
 
 [desktop/sound]
 event-sounds=false
+volume-sound-enabled=true
 volume-sound-file='/usr/share/sounds/LinuxMint/stereo/volume.oga'
+
+[desktop/wm/preferences]
+titlebar-font='Sans Bold 11'
 
 [gestures]
 swipe-down-2='PUSH_TILE_DOWN::end'
@@ -61,13 +84,25 @@ tap-3='MEDIA_PLAY_PAUSE::end'
 [settings-daemon/peripherals/keyboard]
 numlock-state='on'
 
+[settings-daemon/plugins/color]
+night-light-last-coordinates=(41.509999999999998, -87.390000000000001)
+
 [sounds]
+close-enabled=true
 close-file='/usr/share/sounds/LinuxMint/stereo/close.oga'
+login-enabled=true
 login-file='/usr/share/sounds/LinuxMint/stereo/login.oga'
+logout-enabled=true
 logout-file='/usr/share/sounds/LinuxMint/stereo/logout.ogg'
+maximize-enabled=true
 maximize-file='/usr/share/sounds/LinuxMint/stereo/maximize.oga'
+minimize-enabled=true
 minimize-file='/usr/share/sounds/LinuxMint/stereo/minimize.oga'
+notification-enabled=true
 notification-file='/usr/share/sounds/LinuxMint/stereo/notification.oga'
+plug-enabled=true
 plug-file='/usr/share/sounds/LinuxMint/stereo/plug.oga'
+tile-enabled=true
 tile-file='/usr/share/sounds/LinuxMint/stereo/window-slide.ogg'
+unplug-enabled=true
 unplug-file='/usr/share/sounds/LinuxMint/stereo/unplug.oga'
