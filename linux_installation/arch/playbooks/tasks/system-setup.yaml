@@ -168,7 +168,9 @@
   mount:
     path: /var/cache/pacman/pkg
     state: unmounted
-
+  when:
+    - network_pacman_cache | bool
+    
 - name: Require wheel password in sudoers
   lineinfile:
     path: /etc/sudoers
