@@ -6,6 +6,7 @@ device_name: /dev/xxx
 efi_partition: "" # this is initiated blank
 enable_endeavour: true
 flatpak: true
+journald_on_zfs: true
 libvirt: true
 network_pacman_cache: true
 nfs_path: '{{ remote_server }}:/storage/backups/pacman_cache'

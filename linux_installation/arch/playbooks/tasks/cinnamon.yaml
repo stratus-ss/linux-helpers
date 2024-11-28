@@ -7,9 +7,6 @@
       Include = /etc/pacman.d/endeavouros-mirrorlist
   when:
     - enable_endeavour | bool
-    
-- name: Include Endeavour OS Repo
-  include_tasks: endeavour_repo.yaml
 
 - name: Install Cinnamon packages
   become: yes
