@@ -51,6 +51,14 @@
     - desktop | bool
     - flatpak | bool
 
+- name: Modify Faillock increasing number of failures to {{ faillock_retries }}
+  lineinfile:
+    path: "/etc/security/faillock.conf"
+    regexp: '^# deny 6'
+    line: "deny = {{ faillock_retries }}"
+  when:
+    - faillock_increase | bool
+
 - name: Install Desktop packages
   become: yes
   become_user: "{{ username }}"
