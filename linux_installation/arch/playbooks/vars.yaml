@@ -8,6 +8,7 @@ enable_endeavour: true
 faillock_increase: true
 faillock_retries: 6
 flatpak: true
+gaming_platform: true
 journald_on_zfs: true
 libvirt: true
 network_pacman_cache: true
