@@ -152,6 +152,12 @@
     state: present
   when: libvirt | bool
 
+- name: Enable libvirt services
+  systemd:
+    name: libvirtd
+    enabled: yes
+  when: libvirt | bool
+
 - name: Add virtualization groups
   user:
     name: "{{ username }}"
