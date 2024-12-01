@@ -307,6 +307,34 @@
   loop:
     - cups
 
+- name: Ensure [multilib] section and Include line are uncommented in pacman.conf
+  ansible.builtin.blockinfile:
+    path: /etc/pacman.conf
+    block: |
+      [[multilib]
+      Include = /etc/pacman.d/mirrorlist
+    marker: "# {mark} ANSIBLE MANAGED BLOCK FOR MULTILIB"
+    insertbefore: '^\[multilib\]'
+  when: gaming_platform | bool
+
+- name: Set steam_dependencies variable
+  set_fact:
+    steam_dependencies: >-
+      {{ 'lib32-nvidia-utils' if nvidia_dkms or nvidia_lts or nvidia_open else 'lib32-vulkan-intel' }}
+  when: 
+    - gaming_platform | bool
+
+- name: Install steam and lutris
+  pacman: 
+    name:
+      - steam
+      - {{ steam_dependencies }}
+      - lutris
+    state: present
+  when: 
+    - gaming_platform | bool
+  
+
 - name: Include Cinnamon tasks
   include_tasks: cinnamon.yaml
   when:
