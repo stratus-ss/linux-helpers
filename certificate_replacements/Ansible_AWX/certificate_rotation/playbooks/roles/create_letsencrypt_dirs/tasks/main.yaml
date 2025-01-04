@@ -1,0 +1,9 @@
+- name: Ensure certificate directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    recurse: yes
+  loop:
+    - "/etc/letsencrypt/live/{{ base_domain }}"
+    - "/etc/letsencrypt/archive/{{ base_domain }}"

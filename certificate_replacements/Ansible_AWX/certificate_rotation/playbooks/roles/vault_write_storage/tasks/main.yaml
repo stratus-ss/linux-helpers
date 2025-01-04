@@ -1,0 +1,36 @@
+---
+- name: Initialize an empty dictionary for encoded data
+  set_fact:
+    encoded_vault_data: {}
+
+- name: Base64 encode file contents dynamically
+  set_fact:
+    encoded_vault_data: >-
+      {{
+        encoded_vault_data | combine(
+          { item.key: (lookup('file', item.value) | b64encode) }
+        )
+      }}
+  loop: "{{ vault_data | dict2items }}"
+  when: item.value is not none
+
+- name: Debug vault_data
+  debug:
+    var: vault_data
+
+
+# The dict to be written to Vault needs to be inside of a dict called data: {data: {vault_data: {key: valu}}}
+- name: Prepare vault_data for KV v2
+  set_fact:
+    vault_data_prepared:
+      data: "{{ encoded_vault_data }}"
+        
+- name: Store data in HashiCorp Vault
+  community.hashi_vault.vault_write:
+    auth_method: "approle"
+    url: "{{ ansible_hashi_vault_url }}"
+    role_id: "{{ ansible_hashi_vault_role_id }}"
+    secret_id: "{{ ansible_hashi_vault_secret_id }}"
+    path: "{{ vault_path }}"
+    # data can be a dict to accomodate one or more data points
+    data: "{{ vault_data_prepared }}"

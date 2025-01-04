@@ -1,0 +1,27 @@
+---
+- block:
+    - name: Read existing certificate from HashiCorp Vault
+      community.hashi_vault.vault_read:
+        auth_method: approle
+        url: "{{ ansible_hashi_vault_url }}"
+        role_id: "{{ ansible_hashi_vault_role_id }}"
+        secret_id: "{{ ansible_hashi_vault_secret_id }}"
+        path: "{{ vault_path }}"
+      register: vault_cert_read
+      ignore_errors: true
+
+    - name: Write retrieved certificate to local file
+      copy:
+        dest: "{{ cert_dir }}/vault-cert.pem"
+        content: "{{ vault_cert_read.data.data.data.certificate | b64decode }}"
+      when: not vault_cert_read.failed
+  rescue:
+    - name: Handle vault read errors
+      debug:
+        msg: "Failed to read certificate from Vault."
+  always:
+    - name: Ensure local vault certificate is present
+      stat:
+        path: "{{ cert_dir }}/vault-cert.pem"
+      register: vault_cert_stat
+

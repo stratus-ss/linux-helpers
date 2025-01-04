@@ -1,0 +1,111 @@
+---
+- block:
+    - name: Get certificate information
+      community.crypto.x509_certificate_info:
+        path: "{{ cert_dir }}/vault-cert.pem"
+      register: cert_info
+      when: vault_cert_stat.stat.exists
+
+    - name: Check if certs need renewal
+      vars:
+        target_date: "{{ cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ') }}"
+        days_until_target: "{{ ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%SZ') }}"
+        days_remaining: "{{ (target_date | to_datetime('%Y-%m-%d %H:%M:%S') - days_until_target | to_datetime('%Y-%m-%d %H:%M:%S')).days }}"
+        renew_certificate: "{{ days_remaining |int <= 30 }}"
+      set_fact:
+        renew_certificate: "{{ renew_certificate }}"
+        days_remaining: "{{ days_remaining }}" 
+      when: vault_cert_stat.stat.exists
+
+    - name: Display certificate statistics
+      debug:
+        msg:
+          - "Time to renew certificate: {{ renew_certificate }}"
+          - "Days left until expired: {{ days_remaining }}"
+      when: vault_cert_stat.stat.exists
+
+    - name: Set renew_certificate to True if no cert in vault
+      set_fact:
+        renew_certificate: True
+      when: not vault_cert_stat.stat.exists
+
+- block:
+    - name: Check if account key exists
+      stat:
+        path: "{{ cert_dir }}/account.key"
+      register: account_key_stat
+
+    - name: Generate account key if missing
+      community.crypto.openssl_privatekey:
+        path: "{{ cert_dir }}/account.key"
+        size: 4096
+        type: RSA
+      when: not account_key_stat.stat.exists
+
+    - name: Check private key age
+      stat:
+        path: "{{ cert_dir }}/privkey.pem"
+      register: privkey_stat
+
+    - name: Generate new private key if missing or rotation needed
+      community.crypto.openssl_privatekey:
+        path: "{{ cert_dir }}/privkey.pem"
+        size: 4096
+        type: RSA
+      when: >
+        not privkey_stat.stat.exists or
+        (privkey_stat.stat.exists and
+        (ansible_date_time.epoch | int - privkey_stat.stat.mtime | int) > (key_rotation_days * 86400))
+      register: new_private_key
+
+    - name: Generate CSR
+      community.crypto.openssl_csr:
+        path: "{{ cert_dir }}/domain.csr"
+        privatekey_path: "{{ cert_dir }}/privkey.pem"
+        common_name: "{{ requested_domain }}"
+        subject_alt_name: "{{ alt_names }}"
+      vars:
+        alt_names: >-
+          {{ ['DNS:' + requested_domain, 'DNS:' + base_domain] if is_wildcard else ['DNS:' + requested_domain] }}
+
+    - name: Request certificate challenge
+      community.crypto.acme_certificate:
+        account_key_src: "{{ cert_dir }}/account.key"
+        account_email: "{{ email }}"
+        csr: "{{ cert_dir }}/domain.csr"
+        dest: "{{ cert_dir }}/cert.pem"
+        fullchain_dest: "{{ cert_dir }}/fullchain.pem"
+        chain_dest: "{{ cert_dir }}/chain.pem"
+        challenge: dns-01
+        acme_version: 2
+#        acme_directory: https://acme-v02.api.letsencrypt.org/directory
+        acme_directory: https://acme-staging-v02.api.letsencrypt.org/directory
+        terms_agreed: true
+        remaining_days: 30
+        force: "{{ force_renewal | bool }}"
+        select_crypto_backend: openssl
+      when: >
+        (renew_certificate is defined) and
+        (renew_certificate or new_private_key.changed or cert_info.failed)
+      register: challenge_data
+
+    - name: Store certificates in HashiCorp Vault
+      community.hashi_vault.vault_write:
+        auth_method: approle
+        url: "{{ ansible_hashi_vault_url }}"
+        role_id: "{{ ansible_hashi_vault_role_id }}"
+        secret_id: "{{ ansible_hashi_vault_secret_id }}"
+        path: "{{ vault_path }}"
+        data:
+          certificate: "{{ lookup('file', cert_dir + '/fullchain.pem') | b64encode }}"
+          private_key: "{{ lookup('file', cert_dir + '/privkey.pem') | b64encode }}"
+      when: challenge_data.changed
+  rescue:
+    - name: Handle certificate management errors
+      debug:
+        msg: "An error occurred during certificate management."
+  always:
+    - name: Ensure certificate information is up to date
+      debug:
+        msg: "Certificate management tasks completed."
+  when: (renew_certificate is defined) and (renew_certificate)
