@@ -1,0 +1,50 @@
+- name: Manage Let's Encrypt Certificates
+  hosts: localhost
+  connection: local
+  tasks:
+    - block:
+        - name: Start Certificate checks
+          include_role:
+            name: "{{ item }}"
+          with_items:
+            - create_letsencrypt_dirs
+            - vault_read_storage
+            - certificate_management
+            - namecheap_dns
+        
+        # This is required after setting up namecheap in order to complete the request and get the certificates
+        - name: Complete certificate request
+          community.crypto.acme_certificate:
+            account_key_src: "{{ cert_dir }}/account.key"
+            account_email: "{{ email }}"
+            csr: "{{ cert_dir }}/domain.csr"
+            dest: "{{ cert_dir }}/cert.pem"
+            fullchain_dest: "{{ cert_dir }}/fullchain.pem"
+            chain_dest: "{{ cert_dir }}/chain.pem"
+            challenge: dns-01
+            acme_version: 2
+#            acme_directory: https://acme-v02.api.letsencrypt.org/directory
+            acme_directory: https://acme-staging-v02.api.letsencrypt.org/directory
+            terms_agreed: true
+            remaining_days: 30
+            force: "{{ force_renewal | bool }}"
+            select_crypto_backend: openssl
+            data: "{{ challenge_data }}"
+          when: challenge_data.changed
+        
+        - name: Write to vault
+          include_role:
+            name: vault_write_storage
+          when: challenge_data.changed
+
+- name: Move certs to Nextcloud host
+  hosts: "{{ certbot_host }}"
+  tasks:
+    - block:
+        - name: transferring renew_certificate variable between plays
+          set_fact:
+            renew_certificate: "{{ hostvars['localhost']['renew_certificate'] }}"
+        - name: move certs
+          include_role:
+            name: move_certs_to_host
+      when: hostvars['localhost']['renew_certificate'] is defined

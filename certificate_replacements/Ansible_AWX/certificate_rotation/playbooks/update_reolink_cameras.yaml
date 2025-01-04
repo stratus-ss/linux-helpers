@@ -1,0 +1,5 @@
+--- 
+- name: Updating Reolink Camera Certs
+  hosts: localhost
+  tasks:
+    - include_tasks: system-setup.yaml
