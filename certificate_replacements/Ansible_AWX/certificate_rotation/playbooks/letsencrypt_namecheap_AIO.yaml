@@ -1,0 +1,330 @@
+---
+- name: Manage Let's Encrypt Certificates
+  hosts: localhost
+  connection: local
+
+  tasks:
+    - name: Ensure certificate directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        recurse: yes
+      with_items:
+        - "/etc/letsencrypt/live/{{ base_domain }}"
+        - "/etc/letsencrypt/archive/{{ base_domain }}"
+
+    - name: Read existing certificate from HashiCorp Vault
+      community.hashi_vault.vault_read:
+        auth_method: approle
+        url: "{{ ansible_hashi_vault_url }}"
+        role_id: "{{ ansible_hashi_vault_role_id }}"
+        secret_id: "{{ ansible_hashi_vault_secret_id }}"
+        path: "{{ vault_path }}"
+      register: vault_cert_read
+      ignore_errors: true
+
+
+    - name: Write retrieved certificate to local file (if present)
+      copy:
+        dest: "{{ cert_dir }}/vault-cert.pem"
+        content: "{{ vault_cert_read.data.data.data.certificate | b64decode }}"
+      register: create_local_vault_cert
+      when: not vault_cert_read.failed
+
+    - name: Get certificate information
+      community.crypto.x509_certificate_info:
+        path: "{{ cert_dir }}/vault-cert.pem"
+      register: cert_info
+      when: (create_local_vault_cert is defined) and (not vault_cert_read.failed)
+
+    - name: Check if certs need renewal
+      vars: 
+        target_date: "{{ cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ') }}"
+        days_until_target: "{{ ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%SZ') }}"
+        days_remaining: "{{ (target_date | to_datetime('%Y-%m-%d %H:%M:%S') - days_until_target | to_datetime('%Y-%m-%d %H:%M:%S')).days }}"
+        renew_certificate: "{{ days_remaining |int <= 30 }}"
+      set_fact:
+        renew_certificate: "{{ renew_certificate }}"
+        days_remaining: "{{ days_remaining }}"
+      ignore_errors: true
+
+    - name: Display Cert stats
+      debug:
+        msg: 
+          - "Time to renew certificate: {{ renew_certificate }}"
+          - "Days left until expired: {{ days_remaining }}"
+      ignore_errors: true
+
+#    - name: Stop early if no renewal needed
+#      ansible.builtin.assert:
+#        that:
+#            - renew_certificate == True
+
+    - name: Check if account key exists
+      stat:
+        path: "{{ cert_dir }}/account.key"
+      register: account_key_stat
+
+    - name: Generate account key if missing
+      community.crypto.openssl_privatekey:
+        path: "{{ cert_dir }}/account.key"
+        size: 4096
+        type: RSA
+      when: not account_key_stat.stat.exists
+
+    - name: Check private key age
+      stat:
+        path: "{{ cert_dir }}/privkey.pem"
+      register: privkey_stat
+
+    - name: Generate new private key if missing or rotation needed
+      community.crypto.openssl_privatekey:
+        path: "{{ cert_dir }}/privkey.pem"
+        size: 4096
+        type: RSA
+      when: >
+        not privkey_stat.stat.exists or
+        force_renewal or
+        (privkey_stat.stat.exists and
+        (ansible_date_time.epoch|int - privkey_stat.stat.mtime|int) > (key_rotation_days * 86400))
+      register: new_private_key
+
+    - name: Generate CSR
+      community.crypto.openssl_csr:
+        path: "{{ cert_dir }}/domain.csr"
+        privatekey_path: "{{ cert_dir }}/privkey.pem"
+        common_name: "{{ requested_domain }}"
+        subject_alt_name: "{{ alt_names }}"
+      vars:
+        alt_names: >-
+          {{ ['DNS:' + requested_domain, 'DNS:' + base_domain]
+          if is_wildcard else ['DNS:' + requested_domain] }}
+
+
+    - name: Request certificate - create challenge
+      community.crypto.acme_certificate:
+        account_key_src: "{{ cert_dir }}/account.key"
+        account_email: "{{ email }}"
+        csr: "{{ cert_dir }}/domain.csr"
+        dest: "{{ cert_dir }}/cert.pem"
+        fullchain_dest: "{{ cert_dir }}/fullchain.pem"
+        chain_dest: "{{ cert_dir }}/chain.pem"
+        challenge: dns-01
+        acme_version: 2
+        acme_directory: https://acme-v02.api.letsencrypt.org/directory
+        terms_agreed: true
+        remaining_days: 30
+        force: "{{ force_renewal | bool }}"
+        select_crypto_backend: openssl
+      when: >
+        force_renewal or
+        new_private_key.changed
+      register: challenge_data
+
+    - name: Debug Certificate Challenge Details
+      debug:
+        msg: |
+          ============ Certificate Challenge Summary ============
+
+          Domain Details:
+            Requested Domain: {{ requested_domain }}
+            Base Domain: {{ base_domain }}
+
+          DNS Challenge Requirements:
+          {% for domain, values in challenge_data.challenge_data_dns.items() %}
+            Domain: {{ domain }}
+            Required TXT Records:
+            {% for value in values %}
+              - {{ value }}
+            {% endfor %}
+          {% endfor %}
+
+          Authorization Details:
+          {% for domain, auth in challenge_data.authorizations.items() %}
+            Domain: {{ domain }}
+            Status: {{ auth.status }}
+            Expiry: {{ auth.expires }}
+
+            Available Challenge Types:
+            {% for challenge in auth.challenges %}
+              - Type: {{ challenge.type }}
+                Status: {{ challenge.status }}
+                Token: {{ challenge.token }}
+            {% endfor %}
+          {% endfor %}
+
+          Account Information:
+            Account URI: {{ challenge_data.account_uri }}
+            Order URI: {{ challenge_data.order_uri }}
+            Finalize URI: {{ challenge_data.finalize_uri }}
+      vars:
+        ansible_python_interpreter: auto_silent
+      when: challenge_data is defined and challenge_data.changed
+
+
+
+    - name: Set domain variables
+      set_fact:
+        domain_parts: "{{ base_domain.split('.') }}"
+
+    - name: Get existing DNS records
+      uri:
+        url: "https://api.namecheap.com/xml.response"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          ApiUser: "{{ namecheap_api_user }}"
+          ApiKey: "{{ namecheap_api_key }}"
+          UserName: "{{ namecheap_username }}"
+          Command: "namecheap.domains.dns.getHosts"
+          ClientIp: "{{ namecheap_whitelisted_ip }}"
+          SLD: "{{ domain_parts[-2] }}"
+          TLD: "{{ domain_parts[-1] }}"
+        return_content: true
+      register: existing_records
+
+    - name: Parse existing records
+      set_fact:
+        existing_hosts: "{{ existing_records.content | ansible.utils.from_xml | json_query('ApiResponse.CommandResponse.DomainDNSGetHostsResult.host') }}"
+
+    - name: Filter out old challenge records
+      set_fact:
+        filtered_hosts: "{{ existing_hosts | rejectattr('@Name', 'equalto', '_acme-challenge.' + base_domain) | list }}"
+
+    - name: Prepare records body
+      set_fact:
+        dns_body:
+          ApiUser: "{{ namecheap_api_user }}"
+          ApiKey: "{{ namecheap_api_key }}"
+          UserName: "{{ namecheap_username }}"
+          Command: "namecheap.domains.dns.setHosts"
+          ClientIp: "{{ namecheap_whitelisted_ip }}"
+          SLD: "{{ domain_parts[-2] }}"
+          TLD: "{{ domain_parts[-1] }}"
+
+    - name: Add existing records to body
+      set_fact:
+        dns_body: "{{ dns_body | combine({
+          'HostName' ~ (idx + 1): item['@Name'],
+          'RecordType' ~ (idx + 1): item['@Type'],
+          'Address' ~ (idx + 1): item['@Address'],
+          'TTL' ~ (idx + 1): item['@TTL']
+        }) }}"
+      loop: "{{ filtered_hosts }}"
+      loop_control:
+        index_var: idx
+
+    - name: Add challenge records dynamically
+      set_fact:
+        dns_body: "{{ dns_body | combine({
+          'HostName' ~ (filtered_hosts | length + idx + 1): '_acme-challenge.' + '.'.join(domain_parts[:-2]),
+          'RecordType' ~ (filtered_hosts | length + idx + 1): 'TXT',
+          'Address' ~ (filtered_hosts | length + idx + 1): item,
+          'TTL' ~ (filtered_hosts | length + idx + 1): '60'
+        }) }}"
+      loop: "{{ challenge_data.challenge_data_dns['_acme-challenge.' + base_domain] }}"
+      loop_control:
+        index_var: idx
+      when: challenge_data.changed
+
+    - name: Update Namecheap DNS Records
+      uri:
+        url: "https://api.namecheap.com/xml.response"
+        method: POST
+        body_format: form-urlencoded
+        body: "{{ dns_body }}"
+        return_content: true
+      when: challenge_data.changed
+
+    - name: Debug DNS Challenge Information
+      debug:
+        msg:
+          - "Current Domain: {{ requested_domain }}"
+          - "Base Domain: {{ base_domain }}"
+          - "Current TXT Records: {{ existing_hosts | selectattr('@Type', 'equalto', 'TXT') | map(attribute='@Address') | list }}"
+          - "Challenge Records to Add:"
+          - "- Record: _acme-challenge.{{ base_domain }}"
+          - "- Values: {{ challenge_data.challenge_data_dns['_acme-challenge.' + base_domain] }}"
+          - "Let's Encrypt Challenge Requirements:"
+          - "- Record Type: {{ challenge_data.authorizations[requested_domain].challenges | selectattr('type', 'equalto', 'dns-01') | map(attribute='type') | first }}"
+          - "- Token: {{ challenge_data.authorizations[requested_domain].challenges | selectattr('type', 'equalto', 'dns-01') | map(attribute='token') | first }}"
+      when: challenge_data.changed
+
+    - name: Initial wait for DNS propagation
+      pause:
+        minutes: "{{ dns_wait_time }}"
+      when: challenge_data.changed
+
+    - name: Check DNS propagation across multiple providers
+      shell: "dig +short TXT _acme-challenge.{{ base_domain }} @{{ item }}"
+      register: multi_dns_check
+      until: >
+        (challenge_data.challenge_data_dns['_acme-challenge.' + base_domain] | length > 0) and
+        (challenge_data.challenge_data_dns['_acme-challenge.' + base_domain] | select('in', multi_dns_check.stdout) | list | length ==
+        challenge_data.challenge_data_dns['_acme-challenge.' + base_domain] | length)
+      retries: "{{ dns_resolution_retries }}"
+      delay: "{{ dns_retry_interval }}"
+      changed_when: false
+      with_items:
+        - "8.8.8.8"
+        - "1.1.1.1"
+        - "208.67.222.222"
+        - "9.9.9.9"
+      when: challenge_data.changed
+
+    - name: Complete certificate request
+      community.crypto.acme_certificate:
+        account_key_src: "{{ cert_dir }}/account.key"
+        account_email: "{{ email }}"
+        csr: "{{ cert_dir }}/domain.csr"
+        dest: "{{ cert_dir }}/cert.pem"
+        fullchain_dest: "{{ cert_dir }}/fullchain.pem"
+        chain_dest: "{{ cert_dir }}/chain.pem"
+        challenge: dns-01
+        acme_version: 2
+        acme_directory: https://acme-v02.api.letsencrypt.org/directory
+        terms_agreed: true
+        remaining_days: 30
+        force: "{{ force_renewal | bool }}"
+        select_crypto_backend: openssl
+        data: "{{ challenge_data }}"
+      when: challenge_data.changed
+
+    - name: Store certificates in HashiCorp Vault
+      community.hashi_vault.vault_write:
+        auth_method: "approle"
+        url: "{{ ansible_hashi_vault_url }}"
+        role_id: "{{ ansible_hashi_vault_role_id }}"
+        secret_id: "{{ ansible_hashi_vault_secret_id }}"
+        path: "{{ vault_path }}"
+        data:
+          data:
+            certificate: "{{ lookup('file', cert_dir + '/fullchain.pem') | b64encode }}"
+            private_key: "{{ lookup('file', cert_dir + '/privkey.pem') | b64encode }}"
+      when: challenge_data.changed
+
+- name: Transfer certificates to remote host
+  hosts: "{{ certbot_host }}"
+  tasks:
+    - name: Ensure remote certificate directory exists
+      file:
+        path: "/etc/letsencrypt/live/{{ base_domain }}"
+        state: directory
+        mode: '0750'
+        owner: root
+        group: root
+
+    - name: Copy certificates to remote host
+      copy:
+        src: "{{ cert_dir }}/{{ item }}"
+        dest: "/etc/letsencrypt/live/{{ base_domain }}/{{ item }}"
+        mode: '0640'
+        owner: root
+        group: root
+      loop:
+        - cert.pem
+        - chain.pem
+        - fullchain.pem
+        - privkey.pem
+
