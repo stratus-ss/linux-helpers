@@ -1,5 +1,135 @@
---- 
-- name: Updating Reolink Camera Certs
-  hosts: localhost
+---
+- name: Update Reolink Camera Certificates
+  hosts: all
+  gather_facts: false
+
   tasks:
-    - include_tasks: system-setup.yaml
+    - block:
+      - name: Login to Reolink Camera
+        uri:
+          url: "{{ base_url }}/cgi-bin/api.cgi?cmd=Login"
+          method: POST
+          body_format: json
+          body:
+            - cmd: "Login"
+              param:
+                User:
+                  userName: "{{ username }}"
+                  password: "{{ password }}"
+          validate_certs: false
+          return_content: true
+        register: login_response
+
+
+      - name: Set token variable
+        set_fact:
+          token: "{{ (login_response.content | from_json)[0].value.Token.name }}"
+        when: login_response.content is defined
+
+
+      - name: Clear existing certificates
+        uri:
+          url: "{{ base_url }}/cgi-bin/api.cgi?cmd=CertificateClear&token={{ token }}"
+          method: POST
+          body_format: json
+          body:
+            - cmd: "CertificateClear"
+              action: 0
+              param: {}
+          validate_certs: false
+        register: clear_certs_response
+
+      - name: Wait for web daemon restart
+        pause:
+          seconds: 15
+
+      - name: Login again after certificate clear
+        uri:
+          url: "{{ base_url }}/cgi-bin/api.cgi?cmd=Login"
+          method: POST
+          body_format: json
+          body:
+            - cmd: "Login"
+              param:
+                User:
+                  userName: "{{ username }}"
+                  password: "{{ password }}"
+          validate_certs: false
+          return_content: true
+        register: login_response_2
+
+      - name: Set token variable
+        set_fact:
+          token2: "{{ (login_response_2.content | from_json)[0].value.Token.name }}"
+        when: login_response.content is defined
+
+
+      - name: Checking with Vault
+        include_role:
+          name: vault_read_storage
+          
+      - name: Update certificates
+        uri:
+          url: "{{ base_url }}/cgi-bin/api.cgi?cmd=ImportCertificate&token={{ token2 }}"
+          method: POST
+          body_format: json
+          body:
+            - cmd: "ImportCertificate"
+              action: 0
+              param:
+                importCertificate:
+                  crt:
+                    size: "{{ vault_cert_read.data.data.data.certificate | b64decode | length }}"
+                    name: "server.crt"
+                    content: "{{ vault_cert_read.data.data.data.certificate | b64decode | string | b64encode | string }}"
+                  key:
+                    size: "{{ vault_cert_read.data.data.data.private_key | b64decode | length }}"
+                    name: "server.key"
+                    content: "{{ vault_cert_read.data.data.data.private_key | b64decode | string | b64encode | string }}"
+          validate_certs: false
+          return_content: true
+        register: update_certs_response
+
+      - name: Debug certificate content
+        debug:
+          msg:
+            - "Certificate size: {{ vault_cert_read.data.data.data.certificate | b64decode | length }}"
+            - "Certificate content: {{ vault_cert_read.data.data.data.certificate | b64decode | string }}"
+            - "Key size: {{ vault_cert_read.data.data.data.private_key | b64decode | length }}"
+            - "Key Content: {{ vault_cert_read.data.data.data.private_key | b64decode | string  }}"
+
+
+      - name: Debug update response
+        debug:
+          msg: "{{ update_certs_response }}"
+
+      - name: Debug certificate update response
+        debug:
+          msg:
+            - "Status code: {{ update_certs_response.status }}"
+            - "Response content: {{ update_certs_response.content | default('No content') }}"
+            - "Response headers: {{ update_certs_response.headers | default({}) }}"
+            - "Changed: {{ update_certs_response.changed }}"
+            - "Failed: {{ update_certs_response.failed | default(false) }}"
+
+      - name: Set token variable
+        set_fact:
+          change_response: "{{ (update_certs_response.content | from_json) }}"
+
+      - name: Debug login response
+        debug:
+          var: change_response
+          verbosity: 0
+
+      - name: Wait for web daemon restart
+        pause:
+          seconds: 20
+
+      - name: Logout from Reolink Camera
+        uri:
+          url: "{{ base_url }}/cgi-bin/api.cgi?cmd=Logout&token={{ token }}"
+          method: GET
+          validate_certs: false
+        register: logout_response
+      delegate_to: localhost
+      when: inventory_hostname != 'localhost'
