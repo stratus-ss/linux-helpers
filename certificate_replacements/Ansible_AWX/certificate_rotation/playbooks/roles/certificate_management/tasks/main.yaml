@@ -79,7 +79,8 @@
         challenge: dns-01
         acme_version: 2
 #        acme_directory: https://acme-v02.api.letsencrypt.org/directory
-        acme_directory: https://acme-staging-v02.api.letsencrypt.org/directory
+#        acme_directory: https://acme-staging-v02.api.letsencrypt.org/directory
+        acme_directory: "{{ letsencrypt_url }}"
         terms_agreed: true
         remaining_days: 30
         force: "{{ force_renewal | bool }}"
