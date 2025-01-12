@@ -2,7 +2,7 @@
       shell: |
         if ! zpool status {{ zfs_pool_name }} &>/dev/null; then
           zpool create -o ashift=12 {{ zfs_pool_name }} \
-          {{ zfs_pool_devices | join(' ') }}
+          {{ zfs_pool_devices | join(' ') }} -f
         fi
 
     - name: Set pool mountpoint to 'none'
