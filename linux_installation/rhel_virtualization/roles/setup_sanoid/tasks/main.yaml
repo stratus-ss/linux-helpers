@@ -1,0 +1,7 @@
+- name: Getting Sanoid
+  include_tasks: install_sanoid.yaml
+  when: sanoid_install | default(false) | bool
+
+- name: Configuring Sanoid
+  include_tasks: sanoid_config.yaml
+  when: sanoid_install | default(false) | bool

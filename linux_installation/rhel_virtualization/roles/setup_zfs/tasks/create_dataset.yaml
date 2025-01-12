@@ -1,0 +1,16 @@
+# create_dataset.yml
+- name: Create the dataset
+  shell: zfs create {{ zfs_pool_name }}/{{ dataset_item.name }}
+  register: create_dataset
+  failed_when: 
+    - create_dataset.rc is defined
+    - create_dataset.rc not in [0,1]
+
+- name: Ensure local directory exists
+  file:
+    path: "{{ zfs_base_mount_path }}"
+    state: directory
+    mode: '0755'
+
+- name: Set dataset mountpoint
+  shell: zfs set mountpoint={{ zfs_base_mount_path }}/{{ dataset_item.name }} {{ zfs_pool_name }}/{{ dataset_item.name }}

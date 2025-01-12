@@ -1,0 +1,30 @@
+    ###########################################################################
+    # STEP 4: INSTALL OPENZFS (kABI-TRACKING MODULES)
+    ###########################################################################
+    - name: Install zfs-release package
+      package:
+        name: "{{ zfs_rpm_url }}"
+        state: present
+
+    - name: Disable default (DKMS) zfs repo
+      command: dnf config-manager --disable zfs
+
+    - name: Enable kABI-tracking zfs-kmod repo
+      command: dnf config-manager --enable zfs-kmod
+
+    - name: Install the 'zfs' package (kABI-tracking modules)
+      package:
+        name: "zfs"
+        state: present
+
+    - name: Load ZFS module right away
+      command: modprobe zfs
+      register: modprobe_zfs
+      changed_when: modprobe_zfs.rc == 0
+      failed_when: modprobe_zfs.rc != 0
+
+    - name: Ensure ZFS module is loaded at boot
+      copy:
+        dest: /etc/modules-load.d/zfs.conf
+        content: |
+          zfs
