@@ -1,0 +1,90 @@
+
+
+    - name: Ensure /etc/sanoid directory exists
+      file:
+        path: /etc/sanoid
+        state: directory
+        mode: '0755'
+
+    - name: Copy default config
+      copy:
+        src: "{{ sanoid_clone_path }}/sanoid.defaults.conf"
+        dest: /etc/sanoid/sanoid.defaults.conf
+        mode: '0644'
+
+    # to be replaced with actual file
+    - name: Copy example conf
+      copy:
+        src: "{{ sanoid_clone_path }}/sanoid.conf"
+        dest: /etc/sanoid/sanoid.conf
+        mode: '0644'
+
+    - name: Create sanoid.service
+      copy:
+        dest: /etc/systemd/system/sanoid.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Snapshot ZFS Pool
+          Requires=zfs.target
+          After=zfs.target
+          Wants=sanoid-prune.service
+          Before=sanoid-prune.service
+          ConditionFileNotEmpty=/etc/sanoid/sanoid.conf
+
+          [Service]
+          Environment=TZ=UTC
+          Type=oneshot
+          ExecStart=/usr/local/sbin/sanoid --take-snapshots --verbose
+
+    - name: Create sanoid-prune.service
+      copy:
+        dest: /etc/systemd/system/sanoid-prune.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Cleanup ZFS Pool
+          Requires=zfs.target
+          After=zfs.target sanoid.service
+          ConditionFileNotEmpty=/etc/sanoid/sanoid.conf
+
+          [Service]
+          Environment=TZ=UTC
+          Type=oneshot
+          ExecStart=/usr/local/sbin/sanoid --prune-snapshots --verbose
+
+          [Install]
+          WantedBy=sanoid.service
+
+    - name: Create sanoid.timer
+      copy:
+        dest: /etc/systemd/system/sanoid.timer
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Run Sanoid Every 15 Minutes
+          Requires=sanoid.service
+
+          [Timer]
+          OnCalendar=*:0/15
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+
+    ###########################################################################
+    # STEP 8: Reload systemd & Enable Sanoid Services/Timer
+    ###########################################################################
+    - name: Reload systemd daemon
+      command: systemctl daemon-reload
+
+    - name: Enable sanoid-prune.service
+      service:
+        name: sanoid-prune.service
+        enabled: true
+
+    - name: Enable and start sanoid.timer
+      service:
+        name: sanoid.timer
+        enabled: true
+        state: started

@@ -1,0 +1,59 @@
+#Nested Virtualization
+    ###########################################################################
+    # STEP 1: DETERMINE CPU VENDOR (AMD or Intel)
+    ###########################################################################
+    - name: Determine if system is AMD or Intel
+      set_fact:
+        is_amd: "{{ 'AMD' in ansible_processor[1] }}"
+        is_intel: "{{ 'Intel' in ansible_processor[1] }}"
+
+    ###########################################################################
+    # STEP 2: CHECK & ENABLE NESTED VIRTUALIZATION (AMD or Intel only)
+    ###########################################################################
+    - name: Check if nested virtualization is enabled for AMD
+      command: cat /sys/module/kvm_amd/parameters/nested
+      register: nested_amd
+      ignore_errors: true
+      when: is_amd
+
+    - name: Enable nested virtualization for AMD
+      command: modprobe -r kvm_amd && modprobe kvm_amd nested=1
+      when:
+        - is_amd
+        - nested_amd.stdout is defined
+        - nested_amd.stdout != '1'
+      ignore_errors: true
+
+    - name: Persist nested virtualization for AMD
+      copy:
+        dest: /etc/modprobe.d/kvm.conf
+        content: |
+          options kvm_amd nested=1
+      when:
+        - is_amd
+        - nested_amd.stdout is defined
+        - nested_amd.stdout != '1'
+
+    - name: Check if nested virtualization is enabled for Intel
+      command: cat /sys/module/kvm_intel/parameters/nested
+      register: nested_intel
+      ignore_errors: true
+      when: is_intel
+
+    - name: Enable nested virtualization for Intel
+      command: modprobe -r kvm_intel && modprobe kvm_intel nested=1
+      when:
+        - is_intel
+        - nested_intel.stdout is defined
+        - nested_intel.stdout != 'Y'
+      ignore_errors: true
+
+    - name: Persist nested virtualization for Intel
+      copy:
+        dest: /etc/modprobe.d/kvm.conf
+        content: |
+          options kvm_intel nested=1
+      when:
+        - is_intel
+        - nested_intel.stdout is defined
+        - nested_intel.stdout != 'Y'

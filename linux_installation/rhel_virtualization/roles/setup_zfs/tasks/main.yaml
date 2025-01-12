@@ -1,0 +1,11 @@
+    - name: Start ZFS Install
+      include_tasks: install_zfs.yaml
+      when: zfs_install | default(false) |bool
+
+    - name: Zpool Setup
+      include_tasks: create_zpool.yaml
+      when: zpool_setup |default(false) | bool
+
+    - name: ZFS Dataset Creation
+      include_tasks: create_dataset.yaml
+      when: zfs_dataset_creation |default(false) |bool

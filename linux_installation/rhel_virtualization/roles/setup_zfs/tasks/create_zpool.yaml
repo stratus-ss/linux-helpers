@@ -1,0 +1,20 @@
+    - name: Create ZFS pool (if missing)
+      shell: |
+        if ! zpool status {{ zfs_pool_name }} &>/dev/null; then
+          zpool create -o ashift=12 {{ zfs_pool_name }} \
+          {{ zfs_pool_devices | join(' ') }}
+        fi
+
+    - name: Set pool mountpoint to 'none'
+      command: zfs set mountpoint=none {{ zfs_pool_name }}
+
+    - name: Enable LZ4 compression on the pool
+      command: zfs set compression=lz4 {{ zfs_pool_name }}
+      when: zfs_compression |default(false) | bool
+
+    - name: Set xattr=sa and disable atime
+      command: zfs set xattr=sa atime=off {{ zfs_pool_name }}
+
+    - name: Set recordsize to {{ zfs_recordsize }}
+      command: zfs set recordsize={{ zfs_recordsize }} {{ zfs_pool_name }}
+      when: zfs_recordsize is defined
