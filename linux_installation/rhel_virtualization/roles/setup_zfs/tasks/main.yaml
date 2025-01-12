@@ -8,4 +8,7 @@
 
     - name: ZFS Dataset Creation
       include_tasks: create_dataset.yaml
+      loop: "{{ zfs_datasets }}"
+      loop_control:
+        loop_var: dataset_item
       when: zfs_dataset_creation |default(false) |bool

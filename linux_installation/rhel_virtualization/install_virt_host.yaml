@@ -17,6 +17,7 @@
       - virt-install
     sanoid_repo_url: "https://github.com/jimsalterjrs/sanoid.git"
     sanoid_clone_path: "/tmp/sanoid"
+    sanoid_install: true
     zfs_rpm_url: "https://zfsonlinux.org/epel/zfs-release-2-3.el9.noarch.rpm"
     zfs_pool_name: "libvirt_nvmes"
     zfs_pool_devices:
@@ -25,14 +26,18 @@
 
     # Define the datasets you want, each with a specific mountpoint
     zfs_base_mount_path: "/var/lib/libvirt_pools"
+    zfs_compression: true
     zfs_datasets:
-      - name: wiki
-      - name: audio_video
-      - name: games
-      - name: infra
-      - name: containers
-      - name: base_images
+      - wiki
+      - audio_video
+      - games
+      - infra
+      - containers
+      - base_images
+    zfs_dataset_creation: true
+    zfs_install: true
     zfs_recordsize: "64K"
+    zpool_setup: true
   
   tasks:
     ###########################################################################

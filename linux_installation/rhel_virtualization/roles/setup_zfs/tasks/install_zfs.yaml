@@ -1,6 +1,11 @@
     ###########################################################################
     # STEP 4: INSTALL OPENZFS (kABI-TRACKING MODULES)
     ###########################################################################
+    - name: Import ZFS GPG key
+      ansible.builtin.rpm_key:
+        state: present
+        key: https://raw.githubusercontent.com/zfsonlinux/zfsonlinux.github.com/refs/heads/master/zfs-release/RPM-GPG-KEY-openzfs-key2
+
     - name: Install zfs-release package
       package:
         name: "{{ zfs_rpm_url }}"
