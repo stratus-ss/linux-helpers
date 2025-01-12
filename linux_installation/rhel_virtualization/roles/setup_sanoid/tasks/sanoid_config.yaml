@@ -13,11 +13,18 @@
         mode: '0644'
 
     # to be replaced with actual file
-    - name: Copy example conf
-      copy:
-        src: "{{ sanoid_clone_path }}/sanoid.conf"
+#    - name: Copy example conf
+#      copy:
+#        src: "{{ sanoid_clone_path }}/sanoid.conf"
+#        dest: /etc/sanoid/sanoid.conf
+#        mode: '0644'
+
+    - name: Generate sanoid.conf from template
+      template:
+        src: sanoid.conf.j2
         dest: /etc/sanoid/sanoid.conf
         mode: '0644'
+
 
     - name: Create sanoid.service
       copy:
