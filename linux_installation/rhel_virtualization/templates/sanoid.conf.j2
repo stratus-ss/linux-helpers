@@ -1,0 +1,11 @@
+{% for dataset in zfs_datasets %}
+[{{ zfs_pool_name }}/{{ dataset }}]
+    use_template = general
+{% endfor %}
+
+[template_general]
+    daily = 30
+    hourly = 2
+    monthly = 2
+    autosnap = yes
+    autoprune = yes
