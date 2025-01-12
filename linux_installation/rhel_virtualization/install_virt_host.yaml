@@ -18,6 +18,7 @@
     sanoid_repo_url: "https://github.com/jimsalterjrs/sanoid.git"
     sanoid_clone_path: "/tmp/sanoid"
     sanoid_install: true
+    shell_customizations: true
     zfs_rpm_url: "https://zfsonlinux.org/epel/zfs-release-2-3.el9.noarch.rpm"
     zfs_pool_name: "libvirt_nvmes"
     zfs_pool_devices:
@@ -47,6 +48,13 @@
       package:
         name: "{{ extra_packages }}"
         state: present
+
+    - name: Customize Shell
+      include_role:
+        name: shell_customizations
+      when: shell_customizations | default(false) |bool
+
+    - meta: end_play
 
     ###########################################################################
     # STEP 1: DETERMINE CPU VENDOR (AMD or Intel)
