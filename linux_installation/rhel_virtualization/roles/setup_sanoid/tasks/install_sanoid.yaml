@@ -1,0 +1,40 @@
+    - name: Enable codeready-builder repository
+      command: subscription-manager repos --enable=codeready-builder-for-rhel-9-x86_64-rpms
+      register: codeready_repo
+      changed_when: "'enabled' in codeready_repo.stdout.lower()"  # Adjust this as needed
+
+    - name: Install required packages
+      yum:
+        name:
+          - perl-Config-IniFiles
+          - perl-Data-Dumper
+          - perl-Capture-Tiny
+          - perl-Getopt-Long
+          - lzop
+          - mbuffer
+          - mhash
+          - pv
+        state: present
+
+    - name: Clone Sanoid repo
+      git:
+        repo: "{{ sanoid_repo_url }}"
+        dest: "{{ sanoid_clone_path }}"
+      register: git_clone
+
+    - name: Checkout latest stable release
+      args:
+        chdir: "{{ sanoid_clone_path }}"
+      shell: |
+        latest_tag=$(git tag | grep '^v' | tail -n 1)
+        if [ -n "$latest_tag" ]; then
+          git checkout "$latest_tag"
+        fi
+      when: git_clone.after is not none
+
+    - name: Copy Sanoid executables to /usr/local/sbin
+      shell: cp sanoid syncoid findoid sleepymutex /usr/local/sbin/
+      args:
+        chdir: "{{ sanoid_clone_path }}"
+      register: copy_executables
+      changed_when: copy_executables.rc == 0

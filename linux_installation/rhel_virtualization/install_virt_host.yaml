@@ -1,0 +1,91 @@
+---
+- name: Configure Virtualization Host
+  hosts: localhost
+  gather_facts: yes
+  become: true
+
+  vars:
+    cockpit_packages:
+      - cockpit
+    extra_packages:
+      - inxi
+      - nano
+      - git
+    kvm_packages:
+      - qemu-kvm
+      - libvirt
+      - virt-install
+    sanoid_repo_url: "https://github.com/jimsalterjrs/sanoid.git"
+    sanoid_clone_path: "/tmp/sanoid"
+    zfs_rpm_url: "https://zfsonlinux.org/epel/zfs-release-2-3.el9.noarch.rpm"
+    zfs_pool_name: "libvirt_nvmes"
+    zfs_pool_devices:
+      - mirror /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18459M /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18460W
+      - mirror /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18476F /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18491Y
+
+    # Define the datasets you want, each with a specific mountpoint
+    zfs_base_mount_path: "/var/lib/libvirt_pools"
+    zfs_datasets:
+      - name: wiki
+      - name: audio_video
+      - name: games
+      - name: infra
+      - name: containers
+      - name: base_images
+    zfs_recordsize: "64K"
+  
+  tasks:
+    ###########################################################################
+    # STEP 0: Install extra packages
+    ###########################################################################
+    - name: Install extra packages
+      package:
+        name: "{{ extra_packages }}"
+        state: present
+
+    ###########################################################################
+    # STEP 1: DETERMINE CPU VENDOR (AMD or Intel)
+    ###########################################################################
+
+    - name: Starting Nested Virt Checks
+      include_role: 
+        name: nested_virtualization
+
+
+    ###########################################################################
+    # STEP 2: INSTALL AND ENABLE KVM/LIBVIRTD + COCKPIT
+    ###########################################################################
+    - name: Install KVM packages (qemu-kvm, libvirt, virt-install)
+      package:
+        name: "{{ kvm_packages }}"
+        state: present
+
+    - name: Enable and start libvirtd
+      service:
+        name: libvirtd
+        enabled: true
+        state: started
+
+    - name: Install Cockpit
+      package:
+        name: "{{ cockpit_packages }}"
+        state: present
+
+    - name: Enable and start Cockpit service
+      service:
+        name: cockpit
+        enabled: true
+        state: started
+
+    - name: Starting ZFS Section
+      include_role: 
+        name: setup_zfs
+
+
+    ###########################################################################
+    # STEP 6: Install Sanoid
+    ###########################################################################
+
+    - name: Evaluating Sanoid
+      include_role:
+        name: setup_sanoid
