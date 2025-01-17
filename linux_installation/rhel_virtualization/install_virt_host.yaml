@@ -11,6 +11,7 @@
       - inxi
       - nano
       - git
+    gpu_passthrough: true
     kvm_packages:
       - qemu-kvm
       - libvirt
@@ -107,3 +108,13 @@
     - name: Evaluating Sanoid
       include_role:
         name: setup_sanoid
+
+    - name: Enable GPU Passthrough
+      include_role:
+        name: gpu_passthrough
+      when: gpu_passthrough | default(false) | bool
+
+    - name: Verify GPU Passthrough
+      include_role:
+        name: gpu_passhtrough_verification
+      when: gpu_passthrough | default(false) | bool

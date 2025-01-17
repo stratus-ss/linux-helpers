@@ -1,0 +1,41 @@
+    - name: Get all PCI device information
+      ansible.builtin.command: lspci -vnn
+      register: pci_info
+      changed_when: false
+
+    - name: Extract all NVIDIA device IDs
+      ansible.builtin.set_fact:
+        nvidia_ids: "{{ pci_info.stdout | regex_findall('NVIDIA.*?\\[(\\w{4}:\\w{4})\\]') }}"
+
+    - name: Create vfio.conf
+      ansible.builtin.copy:
+        dest: /etc/modprobe.d/vfio.conf
+        content: |
+          blacklist nouveau
+          options vfio_pci ids={{ nvidia_ids | join(',') }}
+        mode: '0644'
+
+    - name: Create nouveau.conf
+      ansible.builtin.copy:
+        dest: /etc/modprobe.d/nouveau.conf
+        content: "blacklist nouveau"
+        mode: '0644'
+
+    - name: Add kernel parameters to GRUB
+      ansible.builtin.lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX="(.*)"$'
+        backrefs: true
+        line: 'GRUB_CMDLINE_LINUX="\1 amd_iommu=on iommu=pt modprobe.blacklist=nouveau"'
+
+    - name: Rebuild GRUB configuration
+      ansible.builtin.command: grub2-mkconfig -o /boot/grub2/grub.cfg
+      changed_when: true
+
+    - name: Rebuild initramfs with dracut
+      ansible.builtin.command: dracut --force
+      changed_when: true
+
+    - name: Reboot system
+      ansible.builtin.reboot:
+        reboot_timeout: 180
