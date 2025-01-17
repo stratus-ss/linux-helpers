@@ -1,0 +1,27 @@
+    - name: Get updated PCI information
+      ansible.builtin.command: lspci -vnn
+      register: pci_info
+      changed_when: false
+
+    - name: Extract driver information for NVIDIA devices
+      ansible.builtin.set_fact:
+        nvidia_drivers: "{{ pci_info.stdout | regex_findall('Kernel driver in use: (vfio-pci)') }}"
+
+    - name: Count total NVIDIA devices
+      ansible.builtin.set_fact:
+        nvidia_count: "{{ pci_info.stdout | regex_findall('NVIDIA Corporation') | length }}"
+
+    - name: Display verification results
+      ansible.builtin.debug:
+        msg:
+          - "Total NVIDIA devices: {{ nvidia_count }}"
+          - "Devices using vfio-pci: {{ nvidia_drivers | length }}"
+          - "Current drivers: {{ nvidia_drivers }}"
+
+    - name: Verify NVIDIA drivers
+      ansible.builtin.assert:
+        that:
+          - nvidia_count | int > 0
+          - (nvidia_drivers | length | int) == (nvidia_count | int)
+        fail_msg: "Not all NVIDIA devices are using vfio-pci driver (Found {{ nvidia_drivers | length }} of {{ nvidia_count }})"
+        success_msg: "All NVIDIA devices are properly configured with vfio-pci driver"
