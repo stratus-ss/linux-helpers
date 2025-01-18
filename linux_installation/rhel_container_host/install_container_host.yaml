@@ -1,0 +1,39 @@
+---
+- name: Configure Container Hosts
+  hosts: localhost
+  gather_facts: yes
+  become: true
+  vars:
+    apache_install: true
+    docker_install: true
+    apache_packages:
+      - httpd
+      - mod_ssl
+    nvidia_install: true
+    vhosts:
+      - name: example.com
+        cert_file_location: /path/to/example.com.crt
+        cert_key_file_location: /path/to/example.com.key
+        app_port: 8080
+
+  tasks:
+    - name: Install Docker
+      include_role:
+        name: docker_host
+      when: docker_install| default(false) |bool
+    
+    - name: Install NVIDIA drivers
+      include_role:
+        name: nvidia_drivers
+      when: nvidia_install| default(false) |bool
+    
+    - name: Install Apache Reverse Proxy
+      include_role:
+        name: apache_reverse_proxy
+      when: apache_install| default(false) |bool
+
+    - name: Reboot the system to apply changes
+      reboot:
+        msg: "Rebooting to apply NVIDIA driver installation."
+        pre_reboot_delay: 5
+      when: nvidia_install | default(false) |bool

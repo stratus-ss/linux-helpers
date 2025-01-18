@@ -1,0 +1,45 @@
+    - name: Enable required repositories
+      community.general.rhsm_repository:
+        name:
+          - rhel-9-for-x86_64-appstream-rpms
+          - rhel-9-for-x86_64-baseos-rpms
+        state: enabled
+
+    - name: Install required packages for NVIDIA driver
+      ansible.builtin.dnf:
+        name:
+          - kernel-devel-{{ ansible_kernel }}
+          - kernel-headers-{{ ansible_kernel }}
+          - gcc
+          - make
+          - dkms
+          - acpid
+          - libglvnd-glx
+          - libglvnd-opengl
+          - libglvnd-devel
+          - pkgconfig
+        state: present
+      become: true
+
+    - name: Add NVIDIA CUDA repository
+      ansible.builtin.yum_repository:
+        name: cuda-rhel9
+        description: NVIDIA CUDA Repository for RHEL 9
+        baseurl: https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/
+        enabled: yes
+        gpgcheck: yes
+        gpgkey: https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
+
+    - name: Install NVIDIA driver module (latest DKMS version)
+      ansible.builtin.dnf:
+        name: '@nvidia-driver:latest-dkms'
+        state: present
+      become: true
+
+    - name: Create nouveau blacklist configuration
+      ansible.builtin.lineinfile:
+        path: /etc/modprobe.d/nouveau.conf
+        line: "blacklist nouveau"
+        owner: root
+        group: root
+        create: true

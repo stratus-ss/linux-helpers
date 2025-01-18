@@ -1,0 +1,30 @@
+Listen 443 https
+
+{% for vhost in vhosts %}
+<VirtualHost {{ vhost.name }}:443>
+    ServerName {{ vhost.name }}
+
+    SSLEngine on
+    SSLCertificateFile {{ vhost.cert_file_location }}
+    SSLCertificateKeyFile {{ vhost.cert_key_file_location }} 
+
+    ProxyPreserveHost On
+    ProxyRequests Off
+
+    RewriteEngine On
+    {% raw %}
+    RewriteCond %{HTTP:Upgrade} websocket [NC]
+    RewriteCond %{HTTP:Connection} upgrade [NC]
+    {% endraw %}
+    RewriteRule /(.*) ws://localhost:{{ vhost.app_port }}/$1 [P,L]
+
+    ProxyPass /api/socket.io ws://localhost:{{ vhost.app_port }}/api/socket.io
+    ProxyPassReverse /api/socket.io ws://localhost:{{ vhost.app_port }}/api/socket.io
+
+    ProxyPass / http://localhost:{{ vhost.app_port }}/
+    ProxyPassReverse / http://localhost:{{ vhost.app_port }}/
+
+    RequestHeader set "X-Forwarded-Proto" "https"
+
+</VirtualHost>
+{% endfor %}

@@ -1,0 +1,40 @@
+    - name: Install required packages
+      ansible.builtin.dnf:
+        name:
+          - dnf-utils
+          - device-mapper-persistent-data
+          - lvm2
+        state: present
+
+    - name: Add Docker repository
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/rhel/docker-ce.repo
+        dest: /etc/yum.repos.d/docker-ce.repo
+
+    - name: Install Docker
+      ansible.builtin.dnf:
+        name: docker-ce
+        state: present
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add NVIDIA package repositories
+      ansible.builtin.get_url:
+        url: https://nvidia.github.io/nvidia-docker/centos7/nvidia-docker.repo
+        dest: /etc/yum.repos.d/nvidia-docker.repo
+
+    - name: Install NVIDIA Container Toolkit and NVIDIA Docker
+      ansible.builtin.dnf:
+        name:
+          - nvidia-container-toolkit
+          - nvidia-docker2
+        state: present
+
+    - name: Restart Docker to apply changes
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
