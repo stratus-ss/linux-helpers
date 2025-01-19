@@ -39,3 +39,18 @@
         name: httpd
         enabled: yes
         state: started
+
+    - name: Gather facts about services
+      service_facts:
+      register: services_state
+
+    - name: Open ports  when firewalld is active
+      ansible.posix.firewalld:
+        port: "{{ item.app_port }}/tcp"
+        state: enabled
+        permanent: true
+        immediate: yes
+      loop: "{{ vhosts }}"
+      when:
+        - "'firewalld.service' in services_state.ansible_facts.services"
+        - "services_state.ansible_facts.services['firewalld.service'].state == 'running'"

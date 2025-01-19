@@ -1,0 +1,19 @@
+Listen 443
+
+{% for vhost in vhosts %}
+<VirtualHost {{ vhost.name }}:443>
+    ServerName {{ vhost.name }}
+
+    SSLEngine on
+    SSLCertificateFile {{ vhost.cert_file_location }}
+    SSLCertificateKeyFile {{ vhost.cert_key_file_location }} 
+
+    ProxyPreserveHost On
+
+    ProxyPass / http://localhost:{{ vhost.app_port }}/
+    ProxyPassReverse / http://localhost:{{ vhost.app_port }}/
+
+    RequestHeader set "X-Forwarded-Proto" "https"
+
+</VirtualHost>
+{% endfor %}
