@@ -1,5 +1,3 @@
-
-
     - name: Ensure /etc/sanoid directory exists
       file:
         path: /etc/sanoid
@@ -11,13 +9,7 @@
         src: "{{ sanoid_clone_path }}/sanoid.defaults.conf"
         dest: /etc/sanoid/sanoid.defaults.conf
         mode: '0644'
-
-    # to be replaced with actual file
-#    - name: Copy example conf
-#      copy:
-#        src: "{{ sanoid_clone_path }}/sanoid.conf"
-#        dest: /etc/sanoid/sanoid.conf
-#        mode: '0644'
+        remote_src: true
 
     - name: Generate sanoid.conf from template
       template:
