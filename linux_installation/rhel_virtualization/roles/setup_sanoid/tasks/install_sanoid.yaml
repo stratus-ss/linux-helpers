@@ -32,9 +32,24 @@
         fi
       when: git_clone.after is not none
 
-    - name: Copy Sanoid executables to /usr/local/sbin
-      shell: cp sanoid syncoid findoid sleepymutex /usr/local/sbin/
-      args:
-        chdir: "{{ sanoid_clone_path }}"
-      register: copy_executables
-      changed_when: copy_executables.rc == 0
+# This is for local playbook
+#    - name: Copy Sanoid executables to /usr/local/sbin
+#      shell: cp sanoid syncoid findoid sleepymutex /usr/local/sbin/
+#      args:
+#        chdir: "{{ sanoid_clone_path }}"
+#      register: copy_executables
+#      changed_when: copy_executables.rc == 0
+
+
+# This is for AWX execution
+    - name: Copy Sanoid executables
+      ansible.builtin.copy:
+        src: "{{ sanoid_clone_path }}/{{ item }}"
+        dest: "/usr/local/sbin/{{ item }}"
+        mode: '0755'
+        remote_src: yes
+      loop:
+        - sanoid
+        - syncoid
+        - findoid
+        - sleepymutex
