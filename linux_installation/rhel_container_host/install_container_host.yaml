@@ -1,20 +1,21 @@
 ---
 - name: Configure Container Hosts
-  hosts: localhost
+  hosts: virtualization
   gather_facts: yes
   become: true
-  vars:
-    apache_install: true
-    docker_install: true
-    apache_packages:
-      - httpd
-      - mod_ssl
-    nvidia_install: true
-    vhosts:
-      - name: example.com
-        cert_file_location: /path/to/example.com.crt
-        cert_key_file_location: /path/to/example.com.key
-        app_port: 8080
+  # uncomment below for local playbook
+  # vars:
+  #   apache_install: true
+  #   docker_install: true
+  #   apache_packages:
+  #     - httpd
+  #     - mod_ssl
+  #   nvidia_install: true
+  #   vhosts:
+  #     - name: example.com
+  #       cert_file_location: /path/to/example.com.crt
+  #       cert_key_file_location: /path/to/example.com.key
+  #       app_port: 8080
 
   tasks:
     - name: Install Docker

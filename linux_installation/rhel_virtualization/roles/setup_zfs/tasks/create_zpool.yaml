@@ -1,8 +1,16 @@
+    # This is for local playbook, the join is slightly different
+    # - name: Create ZFS pool (if missing)
+    #   shell: |
+    #     if ! zpool status {{ zfs_pool_name }} &>/dev/null; then
+    #       zpool create -o ashift=12 {{ zfs_pool_name }} \
+    #       {{ zfs_pool_devices | join(' ') }} -f
+    #     fi
+
     - name: Create ZFS pool (if missing)
       shell: |
         if ! zpool status {{ zfs_pool_name }} &>/dev/null; then
           zpool create -o ashift=12 {{ zfs_pool_name }} \
-          {{ zfs_pool_devices | join(' ') }} -f
+          {{ zfs_pool_devices | join('') }} -f
         fi
 
     - name: Set pool mountpoint to 'none'

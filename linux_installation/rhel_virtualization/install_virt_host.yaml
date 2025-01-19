@@ -1,45 +1,46 @@
 ---
 - name: Configure Virtualization Host
-  hosts: localhost
+  hosts: virtualization
   gather_facts: yes
   become: true
 
-  vars:
-    cockpit_packages:
-      - cockpit
-    extra_packages:
-      - inxi
-      - nano
-      - git
-    gpu_passthrough: true
-    kvm_packages:
-      - qemu-kvm
-      - libvirt
-      - virt-install
-    sanoid_repo_url: "https://github.com/jimsalterjrs/sanoid.git"
-    sanoid_clone_path: "/tmp/sanoid"
-    sanoid_install: true
-    shell_customizations: true
-    zfs_rpm_url: "https://zfsonlinux.org/epel/zfs-release-2-3.el9.noarch.rpm"
-    zfs_pool_name: "libvirt_nvmes"
-    zfs_pool_devices:
-      - mirror /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18459M /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18460W
-      - mirror /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18476F /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18491Y
+# Moved to awx project template
+#  vars:
+#    cockpit_packages:
+#      - cockpit
+#    extra_packages:
+#      - inxi
+#      - nano
+#      - git
+#    gpu_passthrough: true
+#    kvm_packages:
+#      - qemu-kvm
+#      - libvirt
+#      - virt-install
+#    sanoid_repo_url: "https://github.com/jimsalterjrs/sanoid.git"
+#    sanoid_clone_path: "/tmp/sanoid"
+#    sanoid_install: true
+#    shell_customizations: true
+#    zfs_rpm_url: "https://zfsonlinux.org/epel/zfs-release-2-3.el9.noarch.rpm"
+#    zfs_pool_name: "libvirt_nvmes"
+#    zfs_pool_devices:
+#      - mirror /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18459M /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18460W
+#      - mirror /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18476F /dev/disk/by-id/nvme-Samsung_SSD_990_EVO_Plus_1TB_S7U5NJ0XA18491Y
 
     # Define the datasets you want, each with a specific mountpoint
-    zfs_base_mount_path: "/var/lib/libvirt_pools"
-    zfs_compression: true
-    zfs_datasets:
-      - wiki
-      - audio_video
-      - games
-      - infra
-      - containers
-      - base_images
-    zfs_dataset_creation: true
-    zfs_install: true
-    zfs_recordsize: "64K"
-    zpool_setup: true
+#    zfs_base_mount_path: "/var/lib/libvirt_pools"
+#    zfs_compression: true
+#    zfs_datasets:
+#      - wiki
+#      - audio_video
+#      - games
+#      - infra
+#      - containers
+#      - base_images
+#    zfs_dataset_creation: true
+#    zfs_install: true
+#    zfs_recordsize: "64K"
+#    zpool_setup: true
   
   tasks:
     ###########################################################################
@@ -59,8 +60,6 @@
       include_role:
         name: shell_customizations
       when: shell_customizations | default(false) |bool
-
-    - meta: end_play
 
     ###########################################################################
     # STEP 1: DETERMINE CPU VENDOR (AMD or Intel)
@@ -99,6 +98,7 @@
     - name: Starting ZFS Section
       include_role: 
         name: setup_zfs
+      when: zfs_install | default(false) | bool
 
 
     ###########################################################################
@@ -108,6 +108,7 @@
     - name: Evaluating Sanoid
       include_role:
         name: setup_sanoid
+      when: sanoid_install| default(false) |bool
 
     - name: Enable GPU Passthrough
       include_role:
