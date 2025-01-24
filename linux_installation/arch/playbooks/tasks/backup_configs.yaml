@@ -1,0 +1,114 @@
+---
+- name: Backup Configs
+  hosts: stratus-nas
+  gather_facts: false
+  vars:
+    dconf_list:
+      - "/org/cinnamon/"
+      - "/org/cinnamon/desktop/keybindings/"
+      - "/org/virt-manager/"
+    firefox_system_dir: /home/{{ user }}/.mozilla
+    flatpak_list:
+      - "ch.openboard.OpenBoard"
+      - "com.nextcloud.desktopclient.nextcloud"
+      - "com.spotify.Client"
+      - "com.symless.synergy"
+      - "com.ultimaker.cura"
+      - "com.visualstudio.code"
+      - "com.vivaldi.Vivaldi"
+      - "io.ente.auth"
+      - "net.ankiweb.Anki"
+      - "org.blender.Blender"
+      - "org.mozilla.firefox"
+      - "org.telegram.desktop"
+    local_user: "stratus"
+    remote_backup_base: "/storage/backups/flatpak_settings/configs"
+    tarball_directories:
+      - app
+      - .gnupg
+      - autostart
+  tasks:
+    - name: Set date variable using ansible_date_time
+      set_fact:
+        remote_backup_path: "{{ remote_backup_base}}/{{ '%Y-%m-%d' | strftime }}/"
+      delegate_to: localhost
+
+    - name: Ensure destination directory exists
+      ansible.builtin.file:
+        path: "{{ remote_backup_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Ensure app destination directory exists
+      ansible.builtin.file:
+        path: "{{ remote_backup_path }}/app"
+        state: directory
+        mode: '0755'
+
+
+    - name: Dump dconf settings to conf files
+      ansible.builtin.shell: |
+        dconf dump {{ item }} > /tmp/{{ item | regex_replace('^.*/([^/]+)/?$', '\1') }}.conf
+      loop: "{{ dconf_list }}"
+      register: dconf_dump_result
+      changed_when: dconf_dump_result.rc == 0
+      failed_when: dconf_dump_result.rc != 0
+      delegate_to: localhost
+    
+    - name: Sync dconf settings
+      ansible.posix.synchronize:
+        src: /tmp/{{ item | regex_replace('^.*/([^/]+)/?$', '\1') }}.conf
+        dest: "{{ remote_backup_path }}"
+        archive: yes
+        recursive: yes
+        partial: yes
+        private_key: "/home/{{ local_user }}/.ssh/id_rsa"
+        mode: push
+      loop: "{{ dconf_list }}"
+      delegate_to: localhost
+
+    - name: Sync flatpak folders to remote server
+      ansible.posix.synchronize:
+        src: "/home/{{ local_user }}/.var/app/{{ item }}"
+        dest: "{{ remote_backup_path }}/app"
+        archive: yes
+        recursive: yes
+        partial: yes
+        private_key: "/home/{{ local_user }}/.ssh/id_rsa"
+      loop: "{{ flatpak_list }}"
+      delegate_to: localhost
+
+    - name: Synchronize autostart folder
+      ansible.posix.synchronize:
+        src: "/home/{{ local_user }}/.config/autostart"
+        dest: "{{ remote_backup_path }}"
+        archive: yes
+        recursive: yes
+        partial: yes
+        private_key: "/home/{{ local_user }}/.ssh/id_rsa"
+      delegate_to: localhost
+
+    - name: Synchronize gnupg folder
+      ansible.posix.synchronize:
+        src: "/home/{{ local_user }}/.gnupg"
+        dest: "{{ remote_backup_path }}"
+        archive: yes
+        recursive: yes
+        partial: yes
+        private_key: "/home/{{ local_user }}/.ssh/id_rsa"
+      delegate_to: localhost
+    
+    - name: Create tarballs 
+      community.general.archive:
+        path: "{{ remote_backup_path }}/{{ item }}"
+        dest: "{{ remote_backup_path }}/{{ item }}.tar.gz"
+        format: gz
+      loop: "{{ tarball_directories }}"
+      register: archive_result
+
+    - name: Remove original directories
+      ansible.builtin.file:
+        path: "{{ item.item }}"
+        state: absent
+      loop: "{{ archive_result.results }}"
+      when: item.changed

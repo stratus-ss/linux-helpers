@@ -12,11 +12,11 @@
   pfsensible.core.pfsense_dns_resolver:
     state: present
     hosts:
-      - host: "{{ item.name }}"
+      - host: "{{ item.openshift_node_fqdn }}"
         domain: "{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-        ip: "{{ item.ipaddress }}"
-        descr: "OCP {{ item.role }}"
-  loop: "{{ hosts }}"
+        ip: "{{ item.openshift_node_machine_ip_address }}"
+        descr: "OCP {{ 'master' if item.openshift_control_node else 'worker' }}"
+  loop: "{{ openshift_cluster_provision_params }}"
 
 - name: Add zone redirects for the api & apps
   pfsensible.core.pfsense_dns_resolver:

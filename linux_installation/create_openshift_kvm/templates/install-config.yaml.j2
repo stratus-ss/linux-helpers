@@ -26,7 +26,7 @@ platform:
     apiVIPs:
       - {{ API_VIP }}
     ingressVIPs:
-      - {{ INGRESS_VIP }}
+      - {{ APP_VIP }}
     provisioningNetwork: Disabled
     externalBridge: {{ NETWORK_BRIDGE }}
     bootstrapExternalStaticIP: {{ BOOTSTRAP_STATIC_IP }}
@@ -46,8 +46,6 @@ platform:
       rootDeviceHints:
         deviceName: {{ host.openshift_node_install_device }}
       networkConfig:
-        ipAddrs:
-        - {{ host.openshift_node_machine_ip_address }}
         gateway: {{ host.openshift_node_gateway }}
         dns-resolver:
           config:
@@ -61,9 +59,11 @@ platform:
             ipv4:
               dhcp: false
               enabled: true
-              address:
-            - ip: {{ host.openshift_node_machine_ip_address }}
-              prefix-length: {{ host.openshift_node_cidr }}
+              address: 
+                - ip: {{ host.openshift_node_machine_ip_address }}
+                  prefix-length: {{ host.openshift_node_cidr }}
+            ipv6:
+              enabled: false
         routes:
           config:
             - destination: 0.0.0.0/0
@@ -77,6 +77,6 @@ proxy:
  
 additionalTrustBundle: ''
  
-pullSecret: {{ PULL_SECRET }}
+pullSecret: '{{ PULL_SECRET }}'
  
-sshKey: {{ SSH_KEY }}
+sshKey: '{{ SSH_KEY }}'

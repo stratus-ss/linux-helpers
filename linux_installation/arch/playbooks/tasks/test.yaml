@@ -1,0 +1,66 @@
+---
+- name: Backup Configs
+  hosts: localhost
+  gather_facts: false
+  vars:
+    dconf_list:
+      - "/org/cinnamon/"
+      - "/org/cinnamon/desktop/keybindings/"
+      - "/org/virt-manager/"
+    firefox_system_dir: /home/{{ user }}/.mozilla
+    flatpak_list:
+      - "ch.openboard.OpenBoard"
+      - "com.nextcloud.desktopclient.nextcloud"
+      - "com.spotify.Client"
+      - "com.symless.synergy"
+      - "com.ultimaker.cura"
+      - "com.visualstudio.code"
+      - "com.vivaldi.Vivaldi"
+      - "io.ente.auth"
+      - "net.ankiweb.Anki"
+      - "org.blender.Blender"
+      - "org.mozilla.firefox"
+      - "org.telegram.desktop"
+    local_user: "stratus"
+    remote_backup_base: "/storage/backups/flatpak_settings/configs"
+    restore_date: "2025-01-20"
+    restore_dir: /tmp/restore_me
+    remote_server_url: "http://192.168.99.95/configs/{{ restore_date }}"
+  tasks:
+    
+    - name: Sync dconf settings
+      ansible.posix.synchronize:
+        src: "{{ remote_server_url }}/{{ item | regex_replace('^.*/([^/]+)/?$', '\\1') }}.conf"
+        dest: "{{ restore_dir }}"
+        archive: yes
+        recursive: yes
+        partial: yes
+        mode: pull
+      loop: "{{ dconf_list }}"
+      delegate_to: localhost
+
+    - name: Sync flatpak folders to remote server
+      ansible.posix.synchronize:
+        src: "{{ remote_server_url }}/app"
+        dest: "{{ restore_dir }}"
+        archive: yes
+        recursive: yes
+        partial: yes
+      delegate_to: localhost
+
+    - name: Synchronize autostart folder
+      ansible.posix.synchronize:
+        src: "{{ remote_server_url }}/.config/autostart"
+        dest: "{{ restore_dir }}"
+        archive: yes
+        recursive: yes
+        partial: yes
+      delegate_to: localhost
+
+    - name: Synchronize gnupg folder
+      ansible.posix.synchronize:
+        src: "{{ remote_server_url }}/.gnupg"
+        dest: "{{ restore_dir }}"
+        archive: yes
+        recursive: yes
+      delegate_to: localhost

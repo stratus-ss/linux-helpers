@@ -1,0 +1,145 @@
+---
+- name: install flatpaks from flathub
+  hosts: localhost
+  gather_facts: no
+  vars_prompt:
+    - name: "ansible_become_pass"
+      prompt: "Sudo password"
+      private: yes
+
+  collections:
+    - community.ansible-vscode-extension
+  vars:
+    extension_file: "/home/{{ local_user }}/.var/app/com.visualstudio.code/config/Code/vscode-extensions.txt"
+    hostname: example-desktop
+    local_user: stratus
+    restore_date: "2025-01-20"
+    remote_server_url: "http://server.example.com/configs/{{ restore_date }}"
+
+  tasks:
+    - name: Set a hostname specifying strategy
+      ansible.builtin.hostname:
+        name: "{{ hostname }}"
+        use: systemd
+
+    - name: fetch virt-manager settings
+      ansible.builtin.get_url:
+        url: "{{ remote_server_url }}/virt-manager.conf"
+        dest: /home/{{ local_user }}/.config/virt-manager.dconf
+        mode: '0664'
+
+    - name: Restore Virt-Manager settings from backup
+      shell: dconf load /org/virt-manager/ < /home/{{ local_user }}/.config/virt-manager.dconf
+
+    - name: Restore Cinnamon settings from backup
+      shell: dconf load / < /mnt/configs/cinnamon_desktop_config
+
+    - name: Ensure Flatpak is installed
+      package:
+        name: flatpak
+        state: present
+      ignore_errors: yes
+      become: true
+
+    - name: Ensure gnome-keyring is installed
+      package:
+        name: gnome-keyring
+        state: present
+      ignore_errors: yes
+      become: true
+
+    - name: Ensure XDG is installed
+      package:
+        name: xdg-desktop-portal
+        state: present
+      ignore_errors: yes
+      become: true
+
+    - name: Ensure XDG GTK is installed
+      package:
+        name: xdg-desktop-portal-gtk
+        state: present
+      ignore_errors: yes
+      become: true
+
+    - name: Enable xdg-desktop-portal
+      ansible.builtin.systemd_service:
+        name: xdg-desktop-portal
+        state: restarted
+        scope: user
+
+    - name: Add flathub to the user
+      shell: flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo --user
+
+    - name: installing flatpak list A-E
+      community.general.flatpak:
+        name:
+            - org.audacityteam.Audacity
+            - org.blender.Blender
+            - io.ente.auth
+            - org.angryip.ipscan
+            - com.ultimaker.cura
+            - net.ankiweb.Anki
+            - org.gnome.Cheese
+            - org.gnome.Evince
+        state: present
+        method: user
+
+    - name: installing flatpak list F-Q
+      community.general.flatpak:
+        name:
+            - org.freecadweb.FreeCAD
+            - org.gnome.meld
+            - io.mpv.Mpv
+            - org.libreoffice.LibreOffice
+            - fr.handbrake.ghb
+            - com.nextcloud.desktopclient.nextcloud
+            - org.flameshot.Flameshot
+            - ch.openboard.OpenBoard
+            - org.mozilla.firefox
+        state: present
+        method: user
+
+    - name: installing flatpak list R-Z
+      community.general.flatpak:
+        name:
+            - com.skype.Client
+            - com.spotify.Client
+            - com.visualstudio.code
+            - org.telegram.desktop
+            - com.vivaldi.Vivaldi
+        state: present
+        method: user
+
+    - name: Create a directory if it does not exist
+      ansible.builtin.file:
+        path: /home/{{ local_user }}/.var
+        state: directory
+        mode: '0755'
+
+    - name: fetch flatpak settings
+      ansible.builtin.get_url:
+        url: http://{{ remote_server_url }}/flatpak_configs.tar.gz
+        dest: /home/{{ local_user }}/.var/flatpak_configs.tar.gz
+        mode: '0664'
+
+    - name: extract Flatpak settings tarball
+      ansible.builtin.unarchive:
+        src: /home/{{ local_user }}/.var/flatpak_configs.tar.gz
+        dest: /home/{{ local_user }}/.var/
+        owner: {{ local_user }}
+
+    - name: fetch flatpak settings
+      ansible.builtin.get_url:
+        url: "{{ remote_server_url }}/keyrings.tar.gz"
+        dest: /home/{{ local_user }}/.local/share/keyrings.tar.gz
+        mode: '0664'
+
+    - name: Install extensions
+      ansible.builtin.shell: >
+        for item in `cat {{ extension_file }}`; do flatpak run com.visualstudio.code --install-extension $item; done
+      register: loop_result
+
+    - name: Print loop results
+      ansible.builtin.debug:
+        var: loop_result.stdout_lines
