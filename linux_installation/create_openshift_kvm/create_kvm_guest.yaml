@@ -1,0 +1,137 @@
+---
+- name: Create VM on KVM Host
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - vars.yaml
+  tasks:
+    - name: Get VMs list
+      community.libvirt.virt:
+        command: list_vms
+      register: existing_vms
+      changed_when: no
+    
+    - name: Create Control Plane VMs
+      ansible.builtin.include_role:
+        name: create_kvm_guest
+      loop: "{{ control_plane_names }}"
+      loop_control:
+        loop_var: vm_name
+      when: vm_name not in existing_vms.list_vms
+
+    - name: Create Worker Plane VMs
+      ansible.builtin.include_role:
+        name: create_kvm_guest
+      loop: "{{ worker_names }}"
+      loop_control:
+        loop_var: vm_name
+      when: vm_name not in existing_vms.list_vms and worker_names is defined
+
+    - name: register control plane info
+      community.libvirt.virt:
+        command: uuid
+        name: "{{ vm_name }}"
+      register: control_plane_info
+      loop: "{{ control_plane_names }}"
+      loop_control:
+        loop_var: vm_name
+    
+    - name: register worker plane info
+      community.libvirt.virt:
+        command: uuid
+        name: "{{ vm_name }}"
+      register: worker_info
+      loop: "{{ worker_names }}"
+      loop_control:
+        loop_var: vm_name
+      when: worker_names is defined
+
+    - name: Set UUID variables for control plane VMs
+      set_fact:
+        "{{ item.vm_name | replace('-','_') }}_uuid": "{{ item.uuid }}"
+      loop: "{{ control_plane_info.results }}"
+
+    - name: Set UUID variables for worker VMs
+      set_fact:
+        "{{ item.vm_name | replace('-','_') }}_uuid": "{{ item.uuid }}"
+      loop: "{{ worker_info.results }}"
+      when: worker_names is defined
+
+    - name: Display only UUID variables
+      debug:
+        msg: "{{ item }}: {{ hostvars[inventory_hostname][item] }}"
+      loop: "{{ hostvars[inventory_hostname] | dict2items | selectattr('key', 'match', '.*_uuid$') | map(attribute='key') | list }}"
+
+    - name: Ensure LOCAL {{ CLUSTER_NAME }} Directory Exists
+      ansible.builtin.file:
+        path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
+        state: directory
+        
+    - name: Save Install Config
+      ansible.builtin.include_role:
+        name: vault_write_storage
+      vars:
+        file_name: install-config.yaml
+        full_path_to_file: '{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml'
+    
+    - name: Configure RedFish for KVM
+      ansible.builtin.include_role:
+        name: sushy_tools_setup
+
+    - name: Set Host Interface Facts
+      ansible.builtin.include_role:
+        name: get_network_interfaces 
+
+    - name: Create install-config.yaml
+      ansible.builtin.include_role:
+        name: openshift_install_config
+
+- name: Configure DNS
+  hosts: dns
+  gather_facts: false
+  vars_files:
+    vars.yaml
+  tasks:
+    - name: Creating DNS Entries...
+      ansible.builtin.include_role:
+        name: dns_settings_pfsense
+
+- name: Activate Bastion
+  hosts: bastion
+  gather_facts: true
+  vars_files:
+    vars.yaml
+  tasks:
+    - name: Ensure REMOTE {{ CLUSTER_NAME }} Directory Exists
+      ansible.builtin.file:
+        path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
+        state: directory
+        owner: "{{ INSTALL_USER }}"  
+      
+    - name: Copy install-config.yaml to bastion
+      copy:
+        src: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
+        dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
+        mode: '0644'
+        owner: "{{ INSTALL_USER }}" 
+     
+    - name: Check if versioned binaries already exist
+      stat:
+        path: "{{ INSTALL_USER_BINARY_PATH }}/{{ item }}-{{ OPENSHIFT_VERSION }}"
+      register: binary_check
+      loop:
+        - oc
+        - openshift-install
+     
+    - name: Get the proper version of OpenShift
+      ansible.builtin.include_role:
+        name: download_ocp_binaries
+      when: binary_check.results | map(attribute='stat.exists') | select('equalto', false) | list | length > 0
+
+    - name: Setup KVM on Bastion
+      ansible.builtin.include_role:
+        name: bastion_libvirt
+    
+    - name: Launch OpenShift Installer
+      ansible.builtin.command: "{{ INSTALL_USER_BINARY_PATH }}/openshift-install-{{ OPENSHIFT_VERSION }} --dir={{ OPENSHIFT_INSTALL_DIRECTORY }}"
+      register: openshift_install_results

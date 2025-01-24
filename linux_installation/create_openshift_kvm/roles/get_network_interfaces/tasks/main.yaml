@@ -1,0 +1,57 @@
+- name: register control plane info
+  community.libvirt.virt:
+    command: get_interfaces
+    name: "{{ vm_name }}"
+  register: control_plane_info
+  loop: "{{ control_plane_names }}"
+  loop_control:
+    loop_var: vm_name
+
+- name: register worker plane info
+  community.libvirt.virt:
+    command: get_interfaces
+    name: "{{ vm_name }}"
+  register: worker_info
+  loop: "{{ worker_names }}"
+  loop_control:
+    loop_var: vm_name
+  when: worker_names is defined
+
+- name: show variable
+  debug:
+    msg: "{{ openshift_cluster_provision_params }}"
+
+- name: Create dictionary for control plane MAC addresses keyed by vm_name
+  ansible.builtin.set_fact:
+    control_plane_macs: "{{ dict(control_plane_names | zip(control_plane_info.results | map(attribute='network_interfaces'))) }}"
+
+- name: Create dictionary for worker MAC addresses keyed by vm_name
+  ansible.builtin.set_fact:
+    worker_macs: "{{ dict(worker_names | zip(worker_info.results | map(attribute='network_interfaces'))) }}"
+
+- name: debug macs
+  debug:
+    msg: "{{ worker_macs  }}"
+
+- name: Build updated list
+  ansible.builtin.set_fact:
+    updated_list: "{{ updated_list|default([]) + [ merged_item ] }}"
+  loop: "{{ openshift_cluster_provision_params }}"
+  loop_control:
+    label: "{{ item.openshift_node_fqdn }}"
+  vars:
+    merged_item: >-
+      {{
+        item | combine({
+          'openshift_node_mac_address':
+            (
+              control_plane_macs[item.openshift_node_fqdn][control_plane_macs[item.openshift_node_fqdn].keys()|list|first].mac
+              if item.openshift_control_node
+              else worker_macs[item.openshift_node_fqdn][worker_macs[item.openshift_node_fqdn].keys()|list|first].mac
+            )
+        })
+      }}
+
+- name: Update the original data structure
+  ansible.builtin.set_fact:
+    openshift_cluster_provision_params: "{{ updated_list }}"

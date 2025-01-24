@@ -1,0 +1,36 @@
+---
+- name: Install pip
+  ansible.builtin.package:
+    name: pip
+    state: present
+
+- name: Install sushy-tools from pip
+  ansible.builtin.pip:
+    name: sushy-tools
+
+- name: Create systemd service file
+  template:
+    src: "sushy_tools.service.j2"
+    dest: /etc/systemd/system/sushy-emulator.service
+    mode: '0644'
+
+- name: Start and enable sushy-emulator service
+  systemd:
+    name: sushy-emulator
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Gather facts about services
+  service_facts:
+  register: services_state
+
+- name: Open ports  when firewalld is active
+  ansible.posix.firewalld:
+    port: "8000/tcp"
+    state: enabled
+    permanent: true
+    immediate: yes
+  when:
+    - "'firewalld.service' in services_state.ansible_facts.services"
+    - "services_state.ansible_facts.services['firewalld.service'].state == 'running'"

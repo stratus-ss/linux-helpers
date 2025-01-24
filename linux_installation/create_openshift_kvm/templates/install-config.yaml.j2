@@ -1,0 +1,82 @@
+apiVersion: v1
+baseDomain: {{ BASE_DOMAIN }}
+compute:
+- hyperthreading: Enabled
+  name: worker
+  replicas: {{ NUMBER_OF_WORKER_VMS }}
+controlPlane:
+  hyperthreading: Enabled
+  name: master
+  replicas: {{ NUMBER_OF_MASTER_VMS }}
+metadata:
+  name: {{ CLUSTER_NAME }}
+ 
+networking:
+  clusterNetwork:
+  - cidr: {{ CLUSTER_NETWORK }}
+    hostPrefix: 23
+  machineNetwork:
+  - cidr: {{ MACHINE_NETWORK }}
+  networkType: OVNKubernetes
+  serviceNetwork:
+  - {{SERVICE_NETWORK }}
+ 
+platform:
+  baremetal:
+    apiVIPs:
+      - {{ API_VIP }}
+    ingressVIPs:
+      - {{ INGRESS_VIP }}
+    provisioningNetwork: Disabled
+    externalBridge: {{ NETWORK_BRIDGE }}
+    bootstrapExternalStaticIP: {{ BOOTSTRAP_STATIC_IP }}
+    bootstrapExternalStaticGateway: {{ BOOTSTRAP_GW }}
+    bootstrapExternalStaticDNS: {{ BOOTSTRAP_DNS }}
+    hosts:
+    
+{% for host in openshift_cluster_provision_params %}
+    - name: {{ host.openshift_node_fqdn }}
+      role: {{ 'master' if host.openshift_control_node else 'worker' }}
+      bmc:
+          address: "redfish-virtualmedia+http://{{ host.openshift_node_bmc.address }}:8000/redfish/v1/Systems/{{ lookup('vars', (host.openshift_node_fqdn | replace('-','_')) + '_uuid' ) }}"
+          username: {{ host.openshift_node_bmc.username }}
+          password: {{ host.openshift_node_bmc.password }}
+      bootMACAddress: {{ host.openshift_node_mac_address }}
+      bootMode: {{ host.bootMode }}
+      rootDeviceHints:
+        deviceName: {{ host.openshift_node_install_device }}
+      networkConfig:
+        ipAddrs:
+        - {{ host.openshift_node_machine_ip_address }}
+        gateway: {{ host.openshift_node_gateway }}
+        dns-resolver:
+          config:
+            server:
+{% for ns in host.openshift_node_nameservers %}
+              - {{ ns }}
+{% endfor %}
+        interfaces:
+          - name: {{ host.openshift_node_primary_nic }}
+            state: up
+            ipv4:
+              dhcp: false
+              enabled: true
+              address:
+            - ip: {{ host.openshift_node_machine_ip_address }}
+              prefix-length: {{ host.openshift_node_cidr }}
+        routes:
+          config:
+            - destination: 0.0.0.0/0
+              next-hop-address: {{ host.openshift_node_gateway }}
+              next-hop-interface: {{ host.openshift_node_primary_nic }}
+{% endfor %} 
+proxy:
+  httpsProxy: {{ HTTPS_PROXY }}
+  httpProxy: {{ HTTP_PROXY }}
+  noProxy: {{ NO_PROXY }}
+ 
+additionalTrustBundle: ''
+ 
+pullSecret: {{ PULL_SECRET }}
+ 
+sshKey: {{ SSH_KEY }}

@@ -1,0 +1,137 @@
+---
+API_VIP: 10.0.4.100
+APP_VIP: 10.0.4.23
+BASE_DOMAIN: ocp4.example.com
+BOOTSTRAP_STATIC_IP: 10.0.4.102
+BOOTSTRAP_GW: 192.168.122.1
+BOOTSTRAP_DNS: 8.8.8.8
+CLUSTER_NAME: one
+CLUSTER_NETWORK: 172.30.0.0/16
+DNS_NAMESERVER: 10.0.1.7
+HTTPS_PROXY: 
+HTTP_PROXY: 
+INGRESS_VIP: 10.0.4.101
+INSTALL_USER: ocp
+INSTALL_USER_BINARY_PATH: "/home/{{ INSTALL_USER }}/.local/bin/"
+OPENSHIFT_VERSION: 4.17.11
+OPENSHFIT_DOWNLOAD_URL: "https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/{{ OPENSHIFT_VERSION }}"
+OPENSHIFT_INSTALL_DIRECTORY: "/home/{{ INSTALL_USER }}/{{ CLUSTER_NAME }}"
+NETWORK_BRIDGE: br0
+NETWORK_INTERFACE: enp1s0
+NETWORK_GATEWAY: 10.0.1.7
+NETWOKR_CIDR: 23
+NO_PROXY: localhost,127.0.0.1
+NUMBER_OF_MASTER_VMS: 3
+NUMBER_OF_WORKER_VMS: 0
+MACHINE_NETWORK: 172.30.240.0/20
+PULL_SECRET: ''
+SSH_KEY: ""
+SERVICE_NETWORK: 172.30.240.0/24
+SUSHY_SERVER: 10.0.3.2
+
+
+kvm_packages:
+  - qemu-kvm
+  - libvirt
+  - virt-install
+libvirt_pool_dir: extras
+vm_bridge_interface: 
+  - bridge-f0
+  - bridge0-f1
+control_plane_names:
+  - ocp-control1
+  - ocp-control2
+  - ocp-control3
+worker_names:
+  - ocp-worker1
+  - ocp-worker2
+  - ocp-worker3
+vm_ram_mb: 16384
+vm_vcpus: 6
+vm_os: rhel9.2.0
+
+openshift_cluster_provision_params:
+  - bootMode: legacy
+    openshift_control_node: true
+    openshift_node_bmc:
+      address: "{{ SUSHY_SERVER }}"
+      username: admin
+      password: password123
+    openshift_node_cidr: "{{ NETWOKR_CIDR }}"
+    openshift_node_fqdn: "{{ control_plane_names[0] }}"
+    openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
+    openshift_node_nameservers:
+      - "{{ DNS_NAMESERVER }}"
+    openshift_node_machine_ip_address: 10.0.2.1
+    openshift_node_install_device: /dev/vda
+    openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
+  - bootMode: legacy
+    openshift_control_node: true
+    openshift_node_bmc:
+      address: "{{ SUSHY_SERVER }}"
+      username: admin
+      password: password123
+    openshift_node_cidr: "{{ NETWOKR_CIDR }}"
+    openshift_node_fqdn: "{{ control_plane_names[1] }}"
+    openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
+    openshift_node_nameservers:
+      - "{{ DNS_NAMESERVER }}"
+    openshift_node_machine_ip_address: 192.168.95.2
+    openshift_node_install_device: /dev/vda
+    openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
+  - bootMode: legacy
+    openshift_control_node: true
+    openshift_node_bmc:
+      address: "{{ SUSHY_SERVER }}"
+      username: admin
+      password: password123
+    openshift_node_cidr: "{{ NETWOKR_CIDR }}"
+    openshift_node_fqdn: "{{ control_plane_names[2] }}"
+    openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
+    openshift_node_nameservers:
+      - "{{ DNS_NAMESERVER }}"
+    openshift_node_machine_ip_address: 192.168.95.3
+    openshift_node_install_device: /dev/vda
+    openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
+  - bootMode: legacy
+    openshift_control_node: false
+    openshift_node_bmc:
+      address: "{{ SUSHY_SERVER }}"
+      username: admin
+      password: password123
+    openshift_node_cidr: "{{ NETWOKR_CIDR }}"
+    openshift_node_fqdn: "{{ worker_names[0] }}"
+    openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
+    openshift_node_nameservers:
+      - "{{ DNS_NAMESERVER }}"
+    openshift_node_machine_ip_address: 192.168.95.4
+    openshift_node_install_device: /dev/vda
+    openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
+  - bootMode: legacy
+    openshift_control_node: false
+    openshift_node_bmc:
+      address: "{{ SUSHY_SERVER }}"
+      username: admin
+      password: password123
+    openshift_node_cidr: "{{ NETWOKR_CIDR }}"
+    openshift_node_fqdn: "{{ worker_names[1] }}"
+    openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
+    openshift_node_nameservers:
+      - "{{ DNS_NAMESERVER }}"
+    openshift_node_machine_ip_address: 192.168.95.5
+    openshift_node_install_device: /dev/vda
+    openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
+  - bootMode: legacy
+    openshift_control_node: false
+    openshift_node_bmc:
+      address: "{{ SUSHY_SERVER }}"
+      username: admin
+      password: password123
+    openshift_node_cidr: "{{ NETWOKR_CIDR }}"
+    openshift_node_fqdn: "{{ worker_names[2] }}"
+    openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
+    openshift_node_nameservers:
+      - "{{ DNS_NAMESERVER }}"
+    openshift_node_machine_ip_address: 192.168.95.6
+    openshift_node_install_device: /dev/vda
+    openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"

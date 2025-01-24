@@ -1,0 +1,46 @@
+- name: Create ~/.local/bin directory if it doesn't exist
+  file:
+    path: "{{ INSTALL_USER_BINARY_PATH }}"
+    state: directory
+    mode: '0755'
+
+- name: Download OpenShift client and installer
+  get_url:
+    url: "{{ OPENSHFIT_DOWNLOAD_URL }}/{{ item }}"
+    dest: "/tmp/{{ item }}"
+    mode: '0644'
+  loop:
+    - openshift-client-linux.tar.gz
+    - openshift-install-linux.tar.gz
+
+- name: Extract client binary
+  unarchive:
+    src: "/tmp/openshift-client-linux.tar.gz"
+    dest: "/tmp/"
+    remote_src: yes
+
+- name: Extract installer binary
+  unarchive:
+    src: "/tmp/openshift-install-linux.tar.gz"
+    dest: "/tmp/"
+    remote_src: yes
+
+- name: Copy binaries with version suffix
+  copy:
+    src: "/tmp/{{ item }}"
+    dest: "{{ INSTALL_USER_BINARY_PATH }}/{{ item }}-{{ OPENSHIFT_VERSION }}"
+    mode: '0755'
+    remote_src: yes
+  loop:
+    - oc
+    - openshift-install
+
+- name: Cleanup temporary files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/openshift-client-linux.tar.gz"
+    - "/tmp/openshift-install-linux.tar.gz"
+    - "/tmp/client"
+    - "/tmp/installer"
