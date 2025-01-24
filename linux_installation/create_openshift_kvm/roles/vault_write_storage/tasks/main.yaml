@@ -1,4 +1,10 @@
 ---
+- name: create the data dict for Vault
+  ansible.builtin.set_fact:
+    vault_dict:
+      - key: "{{ file_name }}"
+        value: "{{ lookup('file', full_path_to_file ) | b64encode }}"
+
 - name: Store files in HashiCorp Vault
   community.hashi_vault.vault_write:
     auth_method: "approle"
@@ -8,4 +14,4 @@
     path: "{{ vault_path }}"
     data:
       data:
-        "{{ file_name }}": "{{ lookup('file', full_path_to_file ) | b64encode }}"
+         "{{ vault_dict | items2dict }}"

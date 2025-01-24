@@ -4,28 +4,34 @@
   gather_facts: false
   vars_files:
     - vars.yaml
+  vars:
+    install_libvirt: false
+    install_sushy: false
   tasks:
-    - name: Get VMs list
-      community.libvirt.virt:
-        command: list_vms
-      register: existing_vms
-      changed_when: no
-    
-    - name: Create Control Plane VMs
-      ansible.builtin.include_role:
-        name: create_kvm_guest
-      loop: "{{ control_plane_names }}"
-      loop_control:
-        loop_var: vm_name
-      when: vm_name not in existing_vms.list_vms
+    - name: Libvirt Install Tasks
+      block:
+        - name: Get VMs list
+          community.libvirt.virt:
+            command: list_vms
+          register: existing_vms
+          changed_when: no
+        
+        - name: Create Control Plane VMs
+          ansible.builtin.include_role:
+            name: create_kvm_guest
+          loop: "{{ control_plane_names }}"
+          loop_control:
+            loop_var: vm_name
+          when: vm_name not in existing_vms.list_vms
 
-    - name: Create Worker Plane VMs
-      ansible.builtin.include_role:
-        name: create_kvm_guest
-      loop: "{{ worker_names }}"
-      loop_control:
-        loop_var: vm_name
-      when: vm_name not in existing_vms.list_vms and worker_names is defined
+        - name: Create Worker Plane VMs
+          ansible.builtin.include_role:
+            name: create_kvm_guest
+          loop: "{{ worker_names }}"
+          loop_control:
+            loop_var: vm_name
+          when: vm_name not in existing_vms.list_vms and worker_names is defined
+      when: install_libvirt| default(false) | bool
 
     - name: register control plane info
       community.libvirt.virt:
@@ -77,6 +83,7 @@
     - name: Configure RedFish for KVM
       ansible.builtin.include_role:
         name: sushy_tools_setup
+      when: install_sushy| default(false) | bool
 
     - name: Set Host Interface Facts
       ansible.builtin.include_role:
@@ -91,10 +98,13 @@
   gather_facts: false
   vars_files:
     vars.yaml
+  vars:
+    create_dns: false
   tasks:
     - name: Creating DNS Entries...
       ansible.builtin.include_role:
         name: dns_settings_pfsense
+      when: create_dns| default(false)|bool
 
 - name: Activate Bastion
   hosts: bastion
@@ -132,6 +142,13 @@
       ansible.builtin.include_role:
         name: bastion_libvirt
     
+    - name: Sleep for 30 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 30
+      delegate_to: localhost
+
     - name: Launch OpenShift Installer
-      ansible.builtin.command: "{{ INSTALL_USER_BINARY_PATH }}/openshift-install-{{ OPENSHIFT_VERSION }} --dir={{ OPENSHIFT_INSTALL_DIRECTORY }}"
+      become: true
+      become_user: "{{ INSTALL_USER }}"
+      ansible.builtin.command: "{{ INSTALL_USER_BINARY_PATH }}/openshift-install-{{ OPENSHIFT_VERSION }} --dir={{ OPENSHIFT_INSTALL_DIRECTORY }} create cluster"
       register: openshift_install_results

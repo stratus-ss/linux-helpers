@@ -1,16 +1,15 @@
 ---
-API_VIP: 10.0.4.100
-APP_VIP: 10.0.4.23
+API_VIP: 10.0.1.40 
+APP_VIP: 10.0.1.41
 BASE_DOMAIN: ocp4.example.com
-BOOTSTRAP_STATIC_IP: 10.0.4.102
-BOOTSTRAP_GW: 192.168.122.1
-BOOTSTRAP_DNS: 8.8.8.8
+BOOTSTRAP_STATIC_IP: 10.0.2.95
+BOOTSTRAP_GW: 10.0.2.95
+BOOTSTRAP_DNS: 10.0.1.7
 CLUSTER_NAME: one
 CLUSTER_NETWORK: 172.30.0.0/16
 DNS_NAMESERVER: 10.0.1.7
 HTTPS_PROXY: 
 HTTP_PROXY: 
-INGRESS_VIP: 10.0.4.101
 INSTALL_USER: ocp
 INSTALL_USER_BINARY_PATH: "/home/{{ INSTALL_USER }}/.local/bin/"
 OPENSHIFT_VERSION: 4.17.11
@@ -23,10 +22,10 @@ NETWOKR_CIDR: 23
 NO_PROXY: localhost,127.0.0.1
 NUMBER_OF_MASTER_VMS: 3
 NUMBER_OF_WORKER_VMS: 0
-MACHINE_NETWORK: 172.30.240.0/20
+MACHINE_NETWORK: 192.168.94.0/23
 PULL_SECRET: ''
 SSH_KEY: ""
-SERVICE_NETWORK: 172.30.240.0/24
+SERVICE_NETWORK: 172.10.240.0/24
 SUSHY_SERVER: 10.0.3.2
 
 
@@ -49,6 +48,12 @@ worker_names:
 vm_ram_mb: 16384
 vm_vcpus: 6
 vm_os: rhel9.2.0
+
+ansible_hashi_vault_url: "https://vault.example.com"
+ansible_hashi_vault_role_id: ""
+ansible_hashi_vault_secret_id:  ""
+vault_path: configs/data/{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
+
 
 openshift_cluster_provision_params:
   - bootMode: legacy

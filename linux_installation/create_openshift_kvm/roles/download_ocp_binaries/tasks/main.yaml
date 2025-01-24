@@ -26,6 +26,7 @@
     remote_src: yes
 
 - name: Copy binaries with version suffix
+  become_user: "{{ INSTALL_USER }}"
   copy:
     src: "/tmp/{{ item }}"
     dest: "{{ INSTALL_USER_BINARY_PATH }}/{{ item }}-{{ OPENSHIFT_VERSION }}"
