@@ -1,0 +1,13 @@
+[all]
+localhost 
+
+[dns]
+pfsense ansible_host=pfsense.x86experts.com
+
+[dns:vars]
+ansible_ssh_user=admin
+ansible_python_interpreter=/usr/local/bin/python3.11
+ansible_pipelining=true
+
+[bastion]
+bastion.stratus.lab

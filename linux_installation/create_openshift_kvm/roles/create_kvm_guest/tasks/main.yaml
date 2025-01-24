@@ -1,0 +1,22 @@
+---
+- name: Create VM XML definition
+  template:
+    src: vm_template.xml.j2
+    dest: "/tmp/{{ vm_name }}.xml"
+
+- name: Define VM
+  community.libvirt.virt:
+    command: define
+    xml: "{{ lookup('file', '/tmp/' + vm_name + '.xml') }}"
+    uri: qemu:///system
+
+- name: register vm info
+  community.libvirt.virt:
+    command: get_interfaces
+    name: "{{ vm_name }}"
+  register: vminfo
+
+- name: Set interface and mac address facts for vm
+  set_fact:
+    "{{ vm_name | replace('-','_') }}_interfaces": "{{ vminfo.network_interfaces }}"
+  

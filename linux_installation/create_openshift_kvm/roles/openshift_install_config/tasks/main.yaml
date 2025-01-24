@@ -1,0 +1,8 @@
+- name: debug openshift_cluster_provision_params
+  debug:
+    msg: "{{ openshift_cluster_provision_params }}"
+
+- name: Generate cluster-config.yaml
+  ansible.builtin.template:
+    src: install-config.yaml.j2
+    dest: "/home/{{ INSTALL_USER }}/{{ CLUSTER_NAME }}/install-config.yaml"
