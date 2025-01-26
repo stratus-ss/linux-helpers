@@ -5,7 +5,7 @@
   vars_files:
     - vars.yaml
   vars:
-    install_libvirt: false
+    install_libvirt: true
     install_sushy: false
   tasks:
     - name: Libvirt Install Tasks

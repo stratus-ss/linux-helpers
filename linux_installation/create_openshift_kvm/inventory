@@ -10,4 +10,4 @@ ansible_python_interpreter=/usr/local/bin/python3.11
 ansible_pipelining=true
 
 [bastion]
-bastion.stratus.lab
+bastion.x86experts.com

@@ -16,6 +16,17 @@
     name: "{{ vm_name }}"
   register: vminfo
 
+- name: Create the disk image file
+  ansible.builtin.command: "qemu-img create -f qcow2 {{ libvirt_disk_path }}/{{ vm_name }}.qcow2 {{ libvirt_disk_size }}G"
+
+- name: Set proper permissions on disk image
+  ansible.builtin.file:
+    path: "{{ libvirt_disk_path }}/{{ vm_name }}.qcow2"
+    owner: qemu
+    group: qemu
+    mode: '0660'
+
+
 - name: Set interface and mac address facts for vm
   set_fact:
     "{{ vm_name | replace('-','_') }}_interfaces": "{{ vminfo.network_interfaces }}"
