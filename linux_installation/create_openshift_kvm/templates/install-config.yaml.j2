@@ -35,39 +35,40 @@ platform:
     hosts:
     
 {% for host in openshift_cluster_provision_params %}
-    - name: {{ host.openshift_node_fqdn }}
-      role: {{ 'master' if host.openshift_control_node else 'worker' }}
-      bmc:
-          address: "redfish-virtualmedia+http://{{ host.openshift_node_bmc.address }}:8000/redfish/v1/Systems/{{ lookup('vars', (host.openshift_node_fqdn | replace('-','_')) + '_uuid' ) }}"
-          username: {{ host.openshift_node_bmc.username }}
-          password: {{ host.openshift_node_bmc.password }}
-      bootMACAddress: {{ host.openshift_node_mac_address }}
-      bootMode: {{ host.bootMode }}
-      rootDeviceHints:
-        deviceName: {{ host.openshift_node_install_device }}
-      networkConfig:
-        dns-resolver:
-          config:
-            server:
+      - name: {{ host.openshift_node_fqdn }}
+        role: {{ 'master' if host.openshift_control_node else 'worker' }}
+        bmc:
+            address: "redfish-virtualmedia+http://{{ host.openshift_node_bmc.address }}:8000/redfish/v1/Systems/{{ lookup('vars', (host.openshift_node_fqdn | replace('-','_')) + '_uuid' ) }}"
+            username: {{ host.openshift_node_bmc.username }}
+            password: {{ host.openshift_node_bmc.password }}
+        bootMACAddress: {{ host.openshift_node_mac_address }}
+        bootMode: {{ host.bootMode }}
+        rootDeviceHints:
+          deviceName: {{ host.openshift_node_install_device }}
+        networkConfig:
+          dns-resolver:
+            config:
+              server:
 {% for ns in host.openshift_node_nameservers %}
-              - {{ ns }}
+                - {{ ns }}
 {% endfor %}
-        interfaces:
-          - name: {{ host.openshift_node_primary_nic }}
-            state: up
-            ipv4:
-              dhcp: false
-              enabled: true
-              address: 
-                - ip: {{ host.openshift_node_machine_ip_address }}
-                  prefix-length: {{ host.openshift_node_cidr }}
-            ipv6:
-              enabled: false
-        routes:
-          config:
-            - destination: 0.0.0.0/0
-              next-hop-address: {{ host.openshift_node_gateway }}
-              next-hop-interface: {{ host.openshift_node_primary_nic }}
+          interfaces:
+            - name: {{ host.openshift_node_primary_nic }}
+              state: up
+              type: ethernet
+              ipv4:
+                dhcp: false
+                enabled: true
+                address: 
+                  - ip: {{ host.openshift_node_machine_ip_address }}
+                    prefix-length: {{ host.openshift_node_cidr }}
+              ipv6:
+                enabled: false
+          routes:
+            config:
+              - destination: 0.0.0.0/0
+                next-hop-address: {{ host.openshift_node_gateway }}
+                next-hop-interface: {{ host.openshift_node_primary_nic }}
 {% endfor %} 
 proxy:
   httpsProxy: {{ HTTPS_PROXY }}
