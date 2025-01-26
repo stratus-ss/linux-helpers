@@ -46,7 +46,6 @@ platform:
       rootDeviceHints:
         deviceName: {{ host.openshift_node_install_device }}
       networkConfig:
-        gateway: {{ host.openshift_node_gateway }}
         dns-resolver:
           config:
             server:

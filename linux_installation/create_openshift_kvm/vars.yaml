@@ -3,7 +3,7 @@ API_VIP: 10.0.1.40
 APP_VIP: 10.0.1.41
 BASE_DOMAIN: ocp4.example.com
 BOOTSTRAP_STATIC_IP: 10.0.2.95
-BOOTSTRAP_GW: 10.0.2.95
+BOOTSTRAP_GW: 10.0.1.7
 BOOTSTRAP_DNS: 10.0.1.7
 CLUSTER_NAME: one
 CLUSTER_NETWORK: 172.30.0.0/16
@@ -25,18 +25,20 @@ NUMBER_OF_WORKER_VMS: 0
 MACHINE_NETWORK: 192.168.94.0/23
 PULL_SECRET: ''
 SSH_KEY: ""
-SERVICE_NETWORK: 172.10.240.0/24
-SUSHY_SERVER: 10.0.3.2
+SERVICE_NETWORK: 172.29.0.0/20
+SUSHY_SERVER: 10.0.1.1
 
 
 kvm_packages:
   - qemu-kvm
   - libvirt
   - virt-install
-libvirt_pool_dir: extras
+libvirt_pool_name: "libvirt_extras"
+libvirt_disk_path: "/var/lib/{{ libvirt_pool_name }}"
+libvirt_disk_size: 120
 vm_bridge_interface: 
-  - bridge-f0
-  - bridge0-f1
+  - bridge-94
+  - bridge-99
 control_plane_names:
   - ocp-control1
   - ocp-control2
