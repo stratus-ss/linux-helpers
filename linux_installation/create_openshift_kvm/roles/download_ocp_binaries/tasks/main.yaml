@@ -4,14 +4,13 @@
     state: directory
     mode: '0755'
 
-- name: Download OpenShift client and installer
+- name: Download OpenShift client
   get_url:
     url: "{{ OPENSHFIT_DOWNLOAD_URL }}/{{ item }}"
     dest: "/tmp/{{ item }}"
     mode: '0644'
   loop:
     - openshift-client-linux.tar.gz
-    - openshift-install-linux.tar.gz
 
 - name: Extract client binary
   unarchive:
@@ -19,11 +18,62 @@
     dest: "/tmp/"
     remote_src: yes
 
-- name: Extract installer binary
-  unarchive:
-    src: "/tmp/openshift-install-linux.tar.gz"
-    dest: "/tmp/"
-    remote_src: yes
+- block:
+  - name: Download OpenShift installer
+    get_url:
+      url: "{{ OPENSHFIT_DOWNLOAD_URL }}/{{ item }}"
+      dest: "/tmp/{{ item }}"
+      mode: '0644'
+    loop:    
+      - openshift-install-linux.tar.gz
+  
+  - name: Extract installer binary
+    unarchive:
+      src: "/tmp/openshift-install-linux.tar.gz"
+      dest: "/tmp/"
+      remote_src: yes
+  when: not OPENSHIFT_BAREMETAL_INSTALL |default(false) | bool
+
+- block:
+  - name: Get release image content
+    ansible.builtin.uri:
+      url: https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/4.17.11/release.txt
+      return_content: yes
+    register: release_content
+
+  - name: show release
+    debug:
+      msg: "{{ release_content }}"
+
+  - name: Extract release image URL
+    ansible.builtin.set_fact:
+      release_image: "{{ release_content.content | regex_findall('Pull From: quay\\.io[^\\n]*') | first | regex_replace('^Pull From:\\s*', '') }}"
+
+  - name: Set auth file environment variable
+    ansible.builtin.set_fact:
+      REGISTRY_AUTH_FILE: "{{ ansible_facts['env']['HOME'] }}/.pull-secret-temp"
+
+  - name: Create temporary pull secret file
+    ansible.builtin.copy:
+      content: "{{ PULL_SECRET }}"
+      dest: "{{ REGISTRY_AUTH_FILE }}"
+      mode: '0600'
+
+  - name: Extract the openshift-baremetal command
+    ansible.builtin.command: 
+      cmd: >-
+        /tmp/oc adm release extract 
+        --command=openshift-baremetal-install 
+        --to /tmp/ 
+        --from={{ release_image }}
+    environment:
+      REGISTRY_AUTH_FILE: "{{ REGISTRY_AUTH_FILE }}"
+  
+  - name: Remove temporary pull secret file
+    ansible.builtin.file:
+      path: "{{ REGISTRY_AUTH_FILE }}"
+      state: absent
+  when: OPENSHIFT_BAREMETAL_INSTALL | default(false) | bool
 
 - name: Copy binaries with version suffix
   become_user: "{{ INSTALL_USER }}"
@@ -32,9 +82,10 @@
     dest: "{{ INSTALL_USER_BINARY_PATH }}/{{ item }}-{{ OPENSHIFT_VERSION }}"
     mode: '0755'
     remote_src: yes
+    owner: "{{ INSTALL_USER }}"
   loop:
     - oc
-    - openshift-install
+    - "{{ OPENSHIFT_INSTALL_BINARY }}"
 
 - name: Cleanup temporary files
   file:
