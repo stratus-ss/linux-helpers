@@ -1,0 +1,18 @@
+    - name: Get virtual machines currently
+      virt:
+        command: list_vms
+      register: all_vms 
+      become: yes
+
+    - block:
+      - name: Destroy VMs
+        virt:
+          state: destroyed
+          name: "{{ vm }}"
+      
+      - name: remove and undefine vm
+        community.libvirt.virt:
+          command: undefine
+          name: "{{ vm }}"
+          flags: managed_save,snapshots_metadata,delete_volumes
+      when: vm in all_vms.list_vms

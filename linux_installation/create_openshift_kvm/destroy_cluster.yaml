@@ -1,0 +1,129 @@
+---
+- name: Clean Up bastion
+  gather_facts: false
+  hosts: localhost
+  vars:
+    clusterName: "one"
+    destroy_cluster: true
+    openshift_install_dir: "/home/ocp/{{ clusterName }}"
+    openshift_install_state_path: "{{ openshift_install_dir }}/.openshift_install_state.json"
+    pool_name: "vm-nvmes"
+    libvirt_pool: "/var/lib/libvirt_nvme"
+    virt_path: "/var/lib/libvirt/openshift-images/"
+    hostname_or_ip: "10.0.2.95"
+  tasks:
+      - name: Set global facts
+        set_fact:
+          global_vars:
+            clusterName: "{{ clusterName }}"
+            destroy_cluster: "{{ destroy_cluster }}"
+            openshift_install_dir: "{{ openshift_install_dir }}"
+            pool_name: "{{ pool_name }}"
+
+      - name: Ensure Cluster is destroyed
+        ansible.builtin.shell: openshift-install delete cluster --dir {{ openshift_install_dir }}
+        when: destory_cluster | default(false) | bool
+
+      - name: add kvm host to inventory
+        add_host:
+          name: "kvm_server"
+          groups: "remote_kvm"
+          ansible_host: "10.0.1.1"
+          ansible_user: "root"
+
+      - name: Load openshift_install_state.json
+        ansible.builtin.include_vars:
+          file: "{{ openshift_install_dir }}/.openshift_install_state.json"
+          name: openshift_install_state
+        register: openshift_install_state
+      
+      - name: Get virtual machines running on the bastion
+        virt:
+          command: list_vms
+        register: all_vms 
+        become: yes
+
+      - name: Get bootstrap files to cleanup
+        find:
+          paths: "/var/lib/libvirt/openshift-images/"
+          patterns: "*{{ clusterName }}*"
+        register: bootstrapFiles
+        become: yes
+        
+      - name: Delete bootstrap files
+        file:
+          path: "{{ item.path }}"
+          state: "absent"
+        loop: "{{ bootstrapFiles.files }}"
+        become: yes
+        
+      - name: Destroy bootstrap VMs
+        virt:
+          state: destroyed
+          name: "{{ item }}"
+        when: "'bootstrap' in item"
+        loop: "{{ all_vms.list_vms }}" 
+        become: yes
+        
+      - name: Undefine bootstrap VMs
+        virt:
+          command: undefine
+          name: "{{ item }}"
+        when: "'bootstrap' in item"
+        loop: "{{ all_vms.list_vms }}"
+        become: yes
+
+      - name: Remove host key from known_hosts file
+        ansible.builtin.known_hosts:
+          name: "{{ hostname_or_ip }}"
+          state: absent
+
+
+      - name: Extract VM names and ensure uniqueness
+        ansible.builtin.set_fact:
+          vms_to_delete: "{{ openshift_install_state | to_json | regex_findall('ocp-(?:control|worker)\\d+') | unique }}"
+        
+      - name: Show VM names
+        ansible.builtin.debug:
+          msg: "{{ vms_to_delete }}"
+
+- name: Delete VMs
+  gather_facts: false
+  hosts: kvm_server
+  tasks:
+  - block:
+    - name: Stop storage pool
+      community.libvirt.virt_pool:
+        command: destroy
+        name: "{{ hostvars['localhost']['global_vars']['pool_name']}}"
+    - name: Start storage pool
+      community.libvirt.virt_pool:
+        command: create
+        name: "{{ hostvars['localhost']['global_vars']['pool_name']}}"
+
+
+  - name: Call deletion role
+    ansible.builtin.include_role:
+        name: delete_vms
+    loop: "{{ hostvars['localhost']['vms_to_delete'] }}"
+    loop_control:
+      loop_var: vm
+      
+- name: cleanup install dir
+  hosts: localhost
+  gather_facts: false
+  tasks:
+
+      - name: Remove old cluster log file and state file
+        ansible.builtin.file:
+          path: "{{ hostvars['localhost']['global_vars']['openshift_install_dir'] }}/{{ item }}"
+          state: absent
+        loop:
+          - ".openshift_install_state.json"
+          - ".openshift_install.log"
+        when: hostvars['localhost']['global_vars']['destroy_cluster'] | default(false) | bool
+
+      - name: Cleanup files
+        file:
+          path: "/home/ocp/{{ hostvars['localhost']['global_vars']['clusterName'] }}"
+          state: absent
