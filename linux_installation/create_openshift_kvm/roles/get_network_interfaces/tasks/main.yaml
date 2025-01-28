@@ -15,7 +15,9 @@
   loop: "{{ worker_names }}"
   loop_control:
     loop_var: vm_name
-  when: worker_names is defined
+  when: 
+    - worker_names is defined
+    - NUMBER_OF_WORKER_VMS !=0
 
 - name: show variable
   debug:
@@ -28,10 +30,16 @@
 - name: Create dictionary for worker MAC addresses keyed by vm_name
   ansible.builtin.set_fact:
     worker_macs: "{{ dict(worker_names | zip(worker_info.results | map(attribute='network_interfaces'))) }}"
+  when: 
+    - worker_names is defined
+    - NUMBER_OF_WORKER_VMS !=0
 
 - name: debug macs
   debug:
     msg: "{{ worker_macs  }}"
+  when: 
+    - worker_names is defined
+    - NUMBER_OF_WORKER_VMS !=0  
 
 - name: Build updated list
   ansible.builtin.set_fact:
@@ -47,10 +55,19 @@
             (
               control_plane_macs[item.openshift_node_fqdn][control_plane_macs[item.openshift_node_fqdn].keys()|list|first].mac
               if item.openshift_control_node
-              else worker_macs[item.openshift_node_fqdn][worker_macs[item.openshift_node_fqdn].keys()|list|first].mac
+              else (
+                worker_macs[item.openshift_node_fqdn][worker_macs[item.openshift_node_fqdn].keys()|list|first].mac
+                if (worker_names is defined and NUMBER_OF_WORKER_VMS != 0)
+                else omit
+              )
             )
         })
       }}
+  when: >-
+    item.openshift_control_node or
+    (worker_names is defined and NUMBER_OF_WORKER_VMS != 0)
+
+
 
 - name: Update the original data structure
   ansible.builtin.set_fact:
