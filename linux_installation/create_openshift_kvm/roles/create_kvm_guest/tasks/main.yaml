@@ -26,6 +26,10 @@
     group: qemu
     mode: '0660'
 
+- name: Refresh the storage pool
+  community.libvirt.virt_pool:
+      command: refresh
+      name: "{{ libvirt_pool_name }}"
 
 - name: Set interface and mac address facts for vm
   set_fact:

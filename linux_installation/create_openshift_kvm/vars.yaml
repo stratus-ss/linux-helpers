@@ -13,6 +13,7 @@ HTTP_PROXY:
 INSTALL_USER: ocp
 INSTALL_USER_BINARY_PATH: "/home/{{ INSTALL_USER }}/.local/bin/"
 OPENSHIFT_VERSION: 4.17.11
+OPENSHIFT_BAREMETAL_INSTALL: true
 OPENSHFIT_DOWNLOAD_URL: "https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/{{ OPENSHIFT_VERSION }}"
 OPENSHIFT_INSTALL_DIRECTORY: "/home/{{ INSTALL_USER }}/{{ CLUSTER_NAME }}"
 NETWORK_BRIDGE: br0
@@ -28,13 +29,13 @@ SSH_KEY: ""
 SERVICE_NETWORK: 172.29.0.0/20
 SUSHY_SERVER: 10.0.1.1
 
-
 kvm_packages:
   - qemu-kvm
   - libvirt
   - virt-install
-libvirt_pool_name: "libvirt_extras"
-libvirt_disk_path: "/var/lib/{{ libvirt_pool_name }}"
+libvirt_pool_name: "vm-nvmes"
+libvirt_pool_directory: "libvirt_nvmes"
+libvirt_disk_path: "/var/lib/{{ libvirt_pool_directory }}"
 libvirt_disk_size: 120
 vm_bridge_interface: 
   - bridge-94
