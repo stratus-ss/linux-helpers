@@ -1,4 +1,4 @@
-auto_start_app: true
+auto_start_app: false
 custom_firefox_icon: true
 desktop_name: cinnamon
 desktop: true
@@ -8,20 +8,42 @@ enable_endeavour: true
 faillock_increase: true
 faillock_retries: 6
 flatpak: true
+fstab_directories:
+    - "/home/{{ username }}/Games/Steam"
+fstab_entries:
+    - "{{ remote_server }}:/storage/backups/pacman_cache   /var/cache/pacman/pkg/  nfs  x-systemd.requires=zfs-mount.service,x-systemd.automount,x-systemd.device-timeout=10,timeo=05,nofail 0 0"
 gaming_platform: true
 journald_on_zfs: true
 libvirt: true
+luks_passphrase: "" # FILL ME
+luks_volume_name: "cryptroot"
 network_pacman_cache: true
-nfs_path: '{{ remote_server }}:/storage/backups/pacman_cache'
+nfs_path: '{{ remote_server }}:/var/cache/pacman/pkg'
 network_pacman_cache: true
 nvidia_dkms: false
 nvidia_lts: true
 nvidia_open: false
-remote_server: 192.168.1.1
-restore_firefox_backup: true
-restore_user_cryptography: true
+old_pacman_version: false
+remote_server: 192.168.8.95
+restore_firefox_backup: false
+restore_user_cryptography: false
 sudoers_suspend_no_passwd: true
+touchpad_fix: true
 update_fstab: true
-username: '' # FILL ME
+use_archzfs_repo: false
+use_custom_repo: true
+use_luks: true
+username: 'stratus' # FILL ME
 user_password: '' # FILL ME
 zfs_partition: "" # this is initiated blank
+zfs_partition_names:
+    - mountpoint: "/"
+      name: "zroot/ROOT/default"
+      canmount: "noauto"
+    - mountpoint: "/home"
+      name: "zroot/data/home"
+    - mountpoint: "none"
+      name: "zroot/ROOT"
+    - mountpoint: "none"
+      name: "zroot/data"  
+zfs_root_dataset: "zroot"

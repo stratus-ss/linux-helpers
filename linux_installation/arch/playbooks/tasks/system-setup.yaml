@@ -44,35 +44,32 @@
     state: mounted
   when:
     - network_pacman_cache | bool
+    
+- name: Using older version of Pacman
+  block:
+    - name: Copy pacman package
+      copy:
+        src: /var/cache/pacman/pkg/pacman-6.1.0.33-x86_64.pkg.tar.zst
+        dest: /tmp/
+        remote_src: yes
 
-- name: Copy pacman package
-  copy:
-    src: /var/cache/pacman/pkg/pacman-6.1.0.33-x86_64.pkg.tar.zst
-    dest: /tmp/
-    remote_src: yes
-  when:
-    - network_pacman_cache | bool
+    - name: Unmount NFS share
+      mount:
+        path: /var/cache/pacman/pkg
+        state: unmounted
 
-- name: Unmount NFS share
-  mount:
-    path: /var/cache/pacman/pkg
-    state: unmounted
-  when:
-    - network_pacman_cache | bool
+    - name: Install pacman package
+      command: pacman -U /tmp/pacman-6.1.0.33-x86_64.pkg.tar.zst --noconfirm
 
-- name: Install pacman package
-  command: pacman -U /tmp/pacman-6.1.0.33-x86_64.pkg.tar.zst --noconfirm
-  when:
+    - name: Remount NFS share
+      mount:
+        path: /var/cache/pacman/pkg
+        src: "{{ nfs_path }}"
+        fstype: nfs
+        state: mounted
+  when: 
     - network_pacman_cache | bool
-
-- name: Remount NFS share
-  mount:
-    path: /var/cache/pacman/pkg
-    src: "{{ nfs_path }}"
-    fstype: nfs
-    state: mounted
-  when:
-    - network_pacman_cache | bool
+    - old_pacman_version | default(false) |bool
 
 - name: Update makepkg.conf
   lineinfile:
@@ -103,6 +100,7 @@
       - terminator
       - wget
     state: present
+    update_cache: true
 
 - name: Ensure correct ownership of user's home directory
   ansible.builtin.file:
@@ -114,7 +112,7 @@
 
 - name: Clone yay repository
   git:
-    repo: https://aur.archlinux.org/yay.git
+    repo: https://aur.archlinux.org/yay-git.git
     dest: /home/{{ username }}/yay
   become: yes
   become_user: "{{ username }}"
