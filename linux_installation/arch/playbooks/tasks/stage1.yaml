@@ -15,11 +15,18 @@
       ansible.builtin.shell: curl -s https://raw.githubusercontent.com/eoli3n/archiso-zfs/master/init | bash
       args:
         executable: /bin/bash
+      when: use_archzfs_repo | default(true) |bool
 
     - name: Set partition variables
       set_fact:
         efi_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}1"
-        zfs_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2"
+        zfs_partition: >-
+          {% if use_luks | bool %}
+          /dev/mapper/{{ luks_volume_name }}
+          {% else %}
+          {{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2
+          {% endif %}
+        luks_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2" 
 
 
     - name: Zap all partitions on disk
@@ -31,19 +38,22 @@
     - name: Create ZFS partition
       command: sgdisk -n2:0:0 -t2:BF00 {{ device_name }}
 
+    - name: Run partprobe
+      command: partprobe
+
     - name: Format EFI partition
       filesystem:
         fstype: vfat
         dev: "{{ efi_partition }}"
         opts: "-F 32 -n EFI"
 
-    - name: Get PARTUUID of ZFS partition
-      command: blkid -s PARTUUID -o value {{ zfs_partition }}
-      register: partuuid_output
+    - name: (Create and) open the LUKS container; name it {{ luks_volume_name }}
+      community.crypto.luks_device:
+        device: "{{ luks_partition }}"
+        state: "opened"
+        name: "{{ luks_volume_name }}"
+        passphrase: "{{ luks_passphrase }}"
 
-    - name: Set PARTUUID variable
-      set_fact:
-        zfs_partition_uuid: "{{ partuuid_output.stdout }}"
     - name: Load ZFS module
       modprobe:
         name: zfs
@@ -71,18 +81,49 @@
         extra_zfs_properties:
           mountpoint: "{{ item.mountpoint }}"
           canmount: "{{ item.canmount | default(omit) }}"
-      loop:
-        - { name: "zroot/data", mountpoint: "none" }
-        - { name: "zroot/ROOT", mountpoint: "none" }
-        - { name: "zroot/ROOT/default", mountpoint: "/", canmount: "noauto" }
-        - { name: "zroot/data/home", mountpoint: "/home" }
+      loop: "{{ zfs_partition_names }}"
 
     - name: Export ZFS pool
       command: zpool export zroot
+      when: not use_luks| default(false) | bool
 
     - name: Import ZFS pool
       command: zpool import -d /dev/disk/by-path -R /mnt zroot -N
+      when: not use_luks| default(false) | bool
 
+    - name: Handle LUKS disks
+      block:
+        - name: umount ZFS drives
+          ansible.posix.mount:
+            path: "{{ item }}"
+            state: unmounted
+          loop:
+            - "/mnt/home"
+            - "/mnt/boot/EFI"
+            - "/mnt"
+        - name: Export ZFS on LUKS
+          command: zpool export zroot
+
+        - name: Close the existing LUKS container {{ luks_volume_name }}
+          community.crypto.luks_device:
+            state: "closed"
+            name: "{{ luks_volume_name }}"
+    
+        - name: Run partprobe
+          command: partprobe
+
+        - name: Reopen the existing LUKS container {{ luks_volume_name }}
+          community.crypto.luks_device:
+            device: "{{ luks_partition }}"
+            state: "opened"
+            name: "{{ luks_volume_name }}"
+            passphrase: "{{ luks_passphrase }}"
+
+        - name: Import ZFS pool
+          command: zpool import -d {{ zfs_partition }} -R /mnt zroot -N
+          
+      when: use_luks | default(false) | bool
+      
     - name: Mount ZFS root dataset
       command: zfs mount zroot/ROOT/default
 
@@ -110,6 +151,9 @@
         path: /mnt/boot/EFI
         state: directory
 
+    - name: Run partprobe
+      command: partprobe
+
     - name: Mount EFI partition
       mount:
         path: /mnt/boot/EFI
@@ -125,6 +169,19 @@
         state: mounted
       when:
         - network_pacman_cache | bool
+
+    - name: Add custom repository to pacman.conf
+      ansible.builtin.blockinfile:
+        path: /etc/pacman.conf
+        insertbefore: '^\[core\]'
+        block: |
+          [custom]
+          SigLevel = Optional TrustAll
+          Server = file:///var/cache/pacman/pkg
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR CUSTOM REPO"
+      when: use_custom_repo| default(false) | bool
+
+
     - name: Install base system
       command: pacstrap /mnt linux-lts base base-devel intel-ucode nano nfs-utils ansible python-passlib
 

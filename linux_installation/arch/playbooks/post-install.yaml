@@ -32,7 +32,7 @@
       shell: dconf load /org/virt-manager/ < /home/{{ local_user }}/.config/virt-manager.dconf
 
     - name: Restore Cinnamon settings from backup
-      shell: dconf load / < /mnt/configs/cinnamon_desktop_config
+      shell: dconf load /org/cinnamon/ < /mnt/configs/cinnamon_desktop_config
 
     - name: Ensure Flatpak is installed
       package:

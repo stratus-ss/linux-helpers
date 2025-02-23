@@ -9,6 +9,11 @@
     marker: "# {mark} ANSIBLE MANAGED BLOCK FOR CORE-TESTING"
     insertbefore: '^\[core\]'
 
+- name: update all packages
+  community.general.pacman:
+    update_cache: true
+    upgrade: true
+
 - name: Install ZFS packages
   become: yes
   become_user: "{{ username }}"
@@ -21,6 +26,14 @@
       - zfsbootmenu
     state: present
     update_cache: true
+
+- name: Install Luks
+  kewlfft.aur.aur:
+    use: yay
+    name: cryptsetup
+    state: present
+  when: use_luks | default(false) | bool
+
 
 - name: Comment out [core-testing] section in pacman.conf
   ansible.builtin.blockinfile:
@@ -51,7 +64,19 @@
     - zfs-share
     - zfs.target
     - zfs-zed
-    
+
+
+- name: Set partition variables
+  set_fact:
+    zfs_partition: >-
+      {% if use_luks | bool %}
+      /dev/mapper/{{ luks_volume_name }}
+      {% else %}
+      {{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2
+      {% endif %}
+    luks_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2" 
+
+
 - name: Configure ZFSBootMenu
   copy:
     content: |
@@ -75,14 +100,11 @@
         Versions: false
         Enabled: true
       Kernel:
-        CommandLine: ro quiet loglevel=0
+        CommandLine: ro quiet loglevel=0 {% if touchpad_fix |bool %} i8042.reset i8042.nomux=1 initcall_blacklist=dw_i2c_init_driver,dw_i2c_driver_init {% endif %} {% if use_luks | bool %} cryptdevice={{ luks_partition }}:{{ luks_volume_name }}{% endif %}
     dest: /etc/zfsbootmenu/config.yaml
 
-- name: Generate ZFSBootMenu
-  command: generate-zbm
-
 - name: Set ZFS property
-  command: zfs set org.zfsbootmenu:commandline="rw" zroot/ROOT
+  command: zfs set org.zfsbootmenu:commandline="rw" {{ zfs_partition_names[2].name }}
 
 - name: Ensure there is no hostid
   file:
@@ -95,8 +117,61 @@
     regexp: "{{ item.regexp }}"
     line: "{{ item.line }}"
   loop:
-    - { regexp: '^MODULES=', line: 'MODULES=(zfs)' }
+    - { regexp: '^MODULES=', line: 'MODULES=(zfs i2c_hid psmouse)' }
     - { regexp: '^HOOKS=', line: 'HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block zfs filesystems)' }
+  when: not use_luks | default(false) | bool
+
+- name: Configuring ZFS with LUKS
+  block:
+  - name: Get UUID of ZFS partition
+    command: blkid -s UUID -o value {{ luks_partition }}
+    register: partuuid_output
+
+  - name: Set PARTUUID variable
+    set_fact:
+      luks_partition_uuid: "{{ partuuid_output.stdout }}"
+
+  - name: Set Luks in ZFSBootMenu
+    ansible.builtin.command: 'zfs set org.zfsbootmenu:commandline="{{ item }}" {{ zfs_partition_names[0].name }}'
+    loop:
+      - 'rd.luks.name={{ luks_partition_uuid }}={{ luks_volume_name }} zbm.import_policy=hostid zbm.force=1'
+      - 'root=ZFS={{ zfs_root_dataset }} rw'
+      # This sets the OS to prompt for luks password
+      - 'root=ZFS={{ zfs_root_dataset }} rw cryptdevice=UUID={{ luks_partition_uuid }}:{{ luks_volume_name }}'
+
+  - name: Update mkinitcpio.conf with LUKS
+    lineinfile:
+      path: /etc/mkinitcpio.conf
+      regexp: "{{ item.regexp }}"
+      line: "{{ item.line }}"
+    loop:
+      - { regexp: '^MODULES=', line: 'MODULES=(zfs i2c_hid psmouse)' }
+      - { regexp: '^HOOKS=', line: 'HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt zfs filesystems)' }
+
+  - name: Update ZBM mkinitcpio.conf with LUKS
+    lineinfile:
+      path: /etc/zfsbootmenu/mkinitcpio.conf
+      regexp: "{{ item.regexp }}"
+      line: "{{ item.line }}"
+    loop:
+      - { regexp: '^HOOKS=', line: 'HOOKS=(base udev autodetect modconf block filesystems encrypt keyboard zfsbootmenu)' }
+
+  - name: Create ZFSBootMenu dracut configuration directory
+    file:
+      path: /etc/zfsbootmenu/dracut.conf.d
+      state: directory
+
+  - name: Configure ZFSBootMenu to include LUKS modules
+    copy:
+      dest: /etc/zfsbootmenu/dracut.conf.d/luks.conf
+      content: |
+        add_dracutmodules+="crypt"
+        add_drivers+=" aes_generic aes_x86_64 "
+  when: use_luks | default(false)| bool
+
+- name: Generate ZFSBootMenu
+  command: generate-zbm
+
 
 - name: Generate host ID
   shell: zgenhostid $(hostid)
@@ -109,6 +184,6 @@
   lineinfile:
     path: /etc/pacman.conf
     regexp: '^#?IgnorePkg.*'
-    line: 'IgnorePkg   = pacman linux-lts linux-lts-headers nvidia-lts zfs-linux-lts openssh'
+    line: 'IgnorePkg   = {% if old_pacman_version %}pacman {% endif %} linux-lts linux-lts-headers nvidia-lts zfs-linux-lts openssh'
     state: present
 
