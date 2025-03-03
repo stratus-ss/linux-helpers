@@ -100,7 +100,7 @@
         Versions: false
         Enabled: true
       Kernel:
-        CommandLine: ro quiet loglevel=0 {% if touchpad_fix |bool %} i8042.reset i8042.nomux=1 initcall_blacklist=dw_i2c_init_driver,dw_i2c_driver_init {% endif %} {% if use_luks | bool %} cryptdevice={{ luks_partition }}:{{ luks_volume_name }}{% endif %}
+        CommandLine: ro quiet loglevel=0 {% if touchpad_fix |bool %} i8042.reset i8042.nomux=1 initcall_blacklist=dw_i2c_init_driver,dw_i2c_driver_init {% endif %} {% if amdgpu_fix %} amdgpu.dc=1 {% endif %} {% if use_luks | bool %} cryptdevice={{ luks_partition }}:{{ luks_volume_name }}{% endif %}
     dest: /etc/zfsbootmenu/config.yaml
 
 - name: Set ZFS property
