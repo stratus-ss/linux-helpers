@@ -1,0 +1,15 @@
+---
+# roles/cockpit/tasks/main.yml
+- name: Copy certificate files
+  copy:
+    src: "{{ cert_dir }}/{{ item.src }}"
+    dest: "/etc/cockpit/ws-certs.d/{{ item.dest }}"
+    mode: '0600'
+  loop:
+    - { src: "{{ cert_file }}", dest: "cert.cert" }
+    - { src: "{{ key_file }}", dest: "cert.key" }
+
+- name: Restart Cockpit service
+  systemd:
+    name: cockpit
+    state: restarted

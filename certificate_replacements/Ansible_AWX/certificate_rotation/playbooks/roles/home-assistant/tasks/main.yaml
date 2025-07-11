@@ -1,0 +1,24 @@
+---
+# roles/homeassistant/tasks/main.yml
+- name: Mount CIFS share
+  mount:
+    path: /tmp/ha
+    src: //{{ ha_ip }}/ssl
+    fstype: cifs
+    opts: "user=homeassistant,password={{ vault_ha_password }},context='system_u:object_r:container_file_t:s0'"
+    state: mounted
+  become: true
+
+- name: Copy certificate files
+  copy:
+    src: "{{ cert_dir }}/{{ item }}"
+    dest: "/tmp/ha"
+    mode: '0600'
+  loop:
+    - "{{ fullchain_file }}"
+    - "{{ key_file }}"
+
+- name: Unmount CIFS share
+  mount:
+    path: /tmp/ha
+    state: unmounted

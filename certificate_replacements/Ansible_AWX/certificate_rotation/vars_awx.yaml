@@ -1,0 +1,49 @@
+### Survey Variables
+# requested_domain
+# letsencrypt_directory
+# force_renewal: true
+# wild_card: true
+
+base_domain: '{{ requested_domain | regex_replace(''^\*\.'', '''') }}'
+cert_dir: /etc/letsencrypt/live/{{ base_domain }}
+certbot_host: CHANGEME
+cockpit: true
+cockpit_hosts:
+  - fqdn: host.example.com
+email: admin@CHANGEME
+dns_resolution_retries: 5
+dns_retry_interval: 20
+dns_wait_time: 1
+home_assistant_update: true
+ha_ip: CHANGEME
+jellyfin_hosts:
+  - fqdn: host.example.com
+    service_name: nginx
+jellyfin_update: true
+key_rotation_days: 45
+letsencrypt_url: >-
+  {% if letsencrypt_directory=='Production'
+  %}https://acme-v02.api.letsencrypt.org/directory{% else
+  %}https://acme-staging-v02.api.letsencrypt.org/directory{% endif %}
+is_wildcard: '{{ requested_domain.startswith(''*.'') }}'
+namecheap_api_user: CHANGEME
+namecheap_username: CHANGEME
+namecheap_api_key: >-
+  {{ lookup('community.hashi_vault.hashi_vault',
+  'secret=shared_tokens/data/registrar:namecheap_api_key', ) }}
+namecheap_whitelisted_ip: CHANGEME
+reolink_user: CHANGEME
+reolink_url: CHANGEME
+reolink_update: true
+supermicro_update: true
+supermicro_hosts:
+  - fqdn: host.example.com
+    username: CHANGEME
+    password: CHANGEME
+vault_addr: https://CHANGEME
+vault_data:
+  certificate: '{{ cert_dir }}/fullchain.pem'
+  private_key: '{{ cert_dir }}/privkey.pem'
+vault_path: certificates/data/{{ base_domain }}
+unifi_update: true
+unifi_host: CHANGEME

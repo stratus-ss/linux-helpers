@@ -1,0 +1,12 @@
+---
+# roles/supermicro/tasks/main.yml
+- name: Update Supermicro IPMI certificates
+  command:
+    cmd: >
+      ./update_supermicro_ipmi.py 
+      --ipmi-url "https://{{ item.fqdn }}"
+      --key-file "{{ cert_dir }}/{{ key_file }}"
+      --cert-file "{{ cert_dir }}/{{ cert_file }}"
+      --username "{{ item.username }}"
+      --password "{{ item.password }}"
+  loop: "{{ supermicro_hosts }}"
