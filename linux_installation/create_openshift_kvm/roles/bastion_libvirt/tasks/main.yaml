@@ -4,7 +4,7 @@
 
 - name: Install KVM packages (qemu-kvm, libvirt, virt-install)
   package:
-    name: "{{ kvm_packages }}"
+    name: "{{ KVM_PACKAGES }}"
     state: present
 
 - name: Enable and start libvirtd

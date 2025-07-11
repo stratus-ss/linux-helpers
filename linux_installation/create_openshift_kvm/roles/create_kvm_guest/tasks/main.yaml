@@ -17,11 +17,11 @@
   register: vminfo
 
 - name: Create the disk image file
-  ansible.builtin.command: "qemu-img create -f qcow2 {{ libvirt_disk_path }}/{{ vm_name }}.qcow2 {{ libvirt_disk_size }}G"
+  ansible.builtin.command: "qemu-img create -f qcow2 {{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.qcow2 {{ LIBVIRT_DISK_SIZE }}G"
 
 - name: Set proper permissions on disk image
   ansible.builtin.file:
-    path: "{{ libvirt_disk_path }}/{{ vm_name }}.qcow2"
+    path: "{{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.qcow2"
     owner: qemu
     group: qemu
     mode: '0660'
@@ -29,7 +29,7 @@
 - name: Refresh the storage pool
   community.libvirt.virt_pool:
       command: refresh
-      name: "{{ libvirt_pool_name }}"
+      name: "{{ LIBVERT_POOL_NAME }}"
 
 - name: Set interface and mac address facts for vm
   set_fact:

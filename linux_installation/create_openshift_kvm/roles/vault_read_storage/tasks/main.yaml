@@ -1,0 +1,14 @@
+- block:
+    - name: Read from HashiCorp Vault
+      community.hashi_vault.vault_read:
+        auth_method: approle
+        url: "{{ HASHI_VAULT_URL }}"
+        role_id: "{{ HASHI_VAULT_ROLE_ID }}"
+        secret_id: "{{ HASHI_VAULT_SECRET_ID }}"
+        path: "{{ vault_path }}"
+      register: vault_cert_read
+      ignore_errors: true
+
+    - name: Decode certificate if needed
+      set_fact:
+        "{{ fact_var_name }}": "{{ (vault_cert_read | json_query(certificate_data_path) | b64decode | trim) if decode_certificate else (vault_cert_read | json_query(certificate_data_path) | trim) }}"

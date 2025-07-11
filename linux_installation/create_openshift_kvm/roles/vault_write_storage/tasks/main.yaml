@@ -8,10 +8,10 @@
 - name: Store files in HashiCorp Vault
   community.hashi_vault.vault_write:
     auth_method: "approle"
-    url: "{{ ansible_hashi_vault_url }}"
-    role_id: "{{ ansible_hashi_vault_role_id }}"
-    secret_id: "{{ ansible_hashi_vault_secret_id }}"
-    path: "{{ vault_path }}"
+    url: "{{ HASHI_VAULT_URL }}"
+    role_id: "{{ HASHI_VAULT_ROLE_ID }}"
+    secret_id: "{{ HASHI_VAULT_SECRET_ID }}"
+    path: "{{ HASHI_VAULT_PATH }}"
     data:
       data:
          "{{ vault_dict | items2dict }}"

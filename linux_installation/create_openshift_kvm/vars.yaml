@@ -1,6 +1,6 @@
 ---
 API_VIP: 10.11.94.40 
-APP_VIP: 10.11.94.41
+APPS_VIP: 10.11.94.41
 BASE_DOMAIN: ocp4.example.com
 BOOTSTRAP_STATIC_IP: 10.11.95.95
 BOOTSTRAP_GW: 10.11.94.7
@@ -29,40 +29,40 @@ SSH_KEY: ""
 SERVICE_NETWORK: 172.29.0.0/20
 SUSHY_SERVER: 10.11.94.1
 
-additional_trust_bundle: |
+ADDITIONAL_TRUST_BUNDLE: |
     -----BEGIN CERTIFICATE-----
-    EXAMPLE
+    example
     -----END CERTIFICATE-----
 
-kvm_packages:
+KVM_PACKAGES:
   - qemu-kvm
   - libvirt
   - virt-install
 libvirt_pool_name: "vm-nvmes"
-libvirt_pool_directory: "libvirt_nvmes"
-libvirt_disk_path: "/var/lib/{{ libvirt_pool_directory }}"
-libvirt_disk_size: 120
-vm_bridge_interface: 
+LIBVIRT_POOL_DIRECTORY: "libvirt_nvmes"
+LIBVIRT_DISK_PATH: "/var/lib/{{ LIBVIRT_POOL_DIRECTORY }}"
+LIBVIRT_DISK_SIZE: 120
+VM_BRIDGE_INTERFACE: 
   - bridge-94
   - bridge-99
-control_plane_names:
+CONTROL_PLANE_NAMES:
   - ocp-control1
   - ocp-control2
   - ocp-control3
-worker_names:
+WORKER_NAMES:
   - ocp-worker1
   - ocp-worker2
   - ocp-worker3
-vm_ram_mb: 16384
-vm_vcpus: 6
-vm_os: rhel9.2.0
+VM_RAM_MB: 16384
+VM_vCPUS: 6
+VM_OS: rhel9.2.0
 
-ansible_hashi_vault_url: "https://vault.example.com"
-ansible_hashi_vault_role_id: ""
-ansible_hashi_vault_secret_id:  ""
-vault_path: configs/data/{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
+HASHI_VAULT_URL: "https://vault.example.com"
+HASHI_VAULT_ROLE_ID: ""
+HASHI_VAULT_SECRET_ID:  ""
+HASHI_VAULT_PATH: configs/data/{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
 
-vlans:
+VLANS:
     enabled: true
     bond_ports:
       - "{{ NETWORK_INTERFACE }}"
@@ -71,9 +71,9 @@ vlans:
     machine_vlan_id: "94"
     mtu: "1500"
 
-bond_subinterface: "{{ bond_name }}.{{ machine_vlan_id }}"
+BOND_SUBINTERFACE: "{{ bond_name }}.{{ machine_vlan_id }}"
 
-openshift_cluster_provision_params:
+OPENSHIFT_CLUSTER_PROVISION_PARAMS:
   - bootMode: legacy
     openshift_control_node: true
     openshift_node_bmc:
@@ -81,7 +81,7 @@ openshift_cluster_provision_params:
       username: admin
       password: password123
     openshift_node_cidr: "{{ NETWOKR_CIDR }}"
-    openshift_node_fqdn: "{{ control_plane_names[0] }}"
+    openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[0] }}"
     openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
     openshift_node_nameservers:
       - "{{ DNS_NAMESERVER }}"
@@ -95,7 +95,7 @@ openshift_cluster_provision_params:
       username: admin
       password: password123
     openshift_node_cidr: "{{ NETWOKR_CIDR }}"
-    openshift_node_fqdn: "{{ control_plane_names[1] }}"
+    openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[1] }}"
     openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
     openshift_node_nameservers:
       - "{{ DNS_NAMESERVER }}"
@@ -109,7 +109,7 @@ openshift_cluster_provision_params:
       username: admin
       password: password123
     openshift_node_cidr: "{{ NETWOKR_CIDR }}"
-    openshift_node_fqdn: "{{ control_plane_names[2] }}"
+    openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[2] }}"
     openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
     openshift_node_nameservers:
       - "{{ DNS_NAMESERVER }}"
@@ -123,7 +123,7 @@ openshift_cluster_provision_params:
       username: admin
       password: password123
     openshift_node_cidr: "{{ NETWOKR_CIDR }}"
-    openshift_node_fqdn: "{{ worker_names[0] }}"
+    openshift_node_fqdn: "{{ WORKER_NAMES[0] }}"
     openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
     openshift_node_nameservers:
       - "{{ DNS_NAMESERVER }}"

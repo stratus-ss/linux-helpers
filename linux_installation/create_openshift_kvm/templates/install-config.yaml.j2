@@ -34,7 +34,7 @@ platform:
     bootstrapExternalStaticDNS: {{ BOOTSTRAP_DNS }}
     hosts:
     
-{% for host in openshift_cluster_provision_params %}
+{% for host in OPENSHIFT_CLUSTER_PROVISION_PARAMS %}
       - name: {{ host.openshift_node_fqdn }}
         role: {{ 'master' if host.openshift_control_node else 'worker' }}
         bmc:
@@ -53,22 +53,22 @@ platform:
                 - {{ ns }}
 {% endfor %}
           interfaces:
-{% if vlans.enabled %}
-            - name: {{ vlans.bond_name }}
+{% if VLANS.enabled %}
+            - name: {{ VLANS.bond_name }}
               state: up
               type: bond
-              mtu: {{ vlans.mtu }}
+              mtu: {{ VLANS.mtu }}
               ipv4:
                 enabled: false
               link-aggregation:
-                mode: {{ vlans.bond_mode }}
+                mode: {{ VLANS.bond_mode }}
                 options:
                   miimon: '100'
                 port:
-{% for interface in vlans.bond_ports %}
+{% for interface in VLANS.bond_ports %}
                 - {{ interface }}
 {% endfor %}
-            - name: {{ vlans.bond_name }}.{{ vlans.machine_vlan_id }}
+            - name: {{ VLANS.bond_name }}.{{ VLANS.machine_vlan_id }}
               type: vlan
               state: up
               ipv4:
@@ -77,8 +77,8 @@ platform:
                 - ip: {{ host.openshift_node_machine_ip_address }}
                   prefix-length: {{ host.openshift_node_cidr }}
               vlan:
-                base-iface: {{ vlans.bond_name }}
-                id: {{ vlans.machine_vlan_id }}
+                base-iface: {{ VLANS.bond_name }}
+                id: {{ VLANS.machine_vlan_id }}
 {% else %}
             - name: {{ host.openshift_node_primary_nic }}
               state: up
@@ -96,8 +96,8 @@ platform:
             config:
               - destination: 0.0.0.0/0
                 next-hop-address: {{ host.openshift_node_gateway }}
-{% if vlans.enabled %}
-                next-hop-interface: {{ vlans.bond_name }}.{{ vlans.machine_vlan_id }}
+{% if VLANS.enabled %}
+                next-hop-interface: {{ VLANS.bond_name }}.{{ VLANS.machine_vlan_id }}
 {% else %}
                 next-hop-interface: {{ host.openshift_node_primary_nic }}
 {% endif %}
@@ -107,9 +107,9 @@ proxy:
   httpProxy: {{ HTTP_PROXY }}
   noProxy: {{ NO_PROXY }}
  
-{% if additional_trust_bundle is defined and additional_trust_bundle |length > 0 %}
+{% if ADDITIONAL_TRUST_BUNDLE is defined and ADDITIONAL_TRUST_BUNDLE |length > 0 %}
 additionalTrustBundle: |
-{{ additional_trust_bundle | indent(4)}}
+{{ ADDITIONAL_TRUST_BUNDLE | indent(4)}}
 {% else %}
 additionalTrustBundle: ''
 {%endif %}

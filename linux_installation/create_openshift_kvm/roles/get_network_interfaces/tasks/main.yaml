@@ -3,7 +3,7 @@
     command: get_interfaces
     name: "{{ vm_name }}"
   register: control_plane_info
-  loop: "{{ control_plane_names }}"
+  loop: "{{ CONTROL_PLANE_NAMES }}"
   loop_control:
     loop_var: vm_name
 
@@ -12,39 +12,39 @@
     command: get_interfaces
     name: "{{ vm_name }}"
   register: worker_info
-  loop: "{{ worker_names }}"
+  loop: "{{ WORKER_NAMES }}"
   loop_control:
     loop_var: vm_name
   when: 
-    - worker_names is defined
+    - WORKER_NAMES is defined
     - NUMBER_OF_WORKER_VMS !=0
 
 - name: show variable
   debug:
-    msg: "{{ openshift_cluster_provision_params }}"
+    msg: "{{ OPENSHIFT_CLUSTER_PROVISION_PARAMS }}"
 
 - name: Create dictionary for control plane MAC addresses keyed by vm_name
   ansible.builtin.set_fact:
-    control_plane_macs: "{{ dict(control_plane_names | zip(control_plane_info.results | map(attribute='network_interfaces'))) }}"
+    control_plane_macs: "{{ dict(CONTROL_PLANE_NAMES | zip(control_plane_info.results | map(attribute='network_interfaces'))) }}"
 
 - name: Create dictionary for worker MAC addresses keyed by vm_name
   ansible.builtin.set_fact:
-    worker_macs: "{{ dict(worker_names | zip(worker_info.results | map(attribute='network_interfaces'))) }}"
+    worker_macs: "{{ dict(WORKER_NAMES | zip(worker_info.results | map(attribute='network_interfaces'))) }}"
   when: 
-    - worker_names is defined
+    - WORKER_NAMES is defined
     - NUMBER_OF_WORKER_VMS !=0
 
 - name: debug macs
   debug:
     msg: "{{ worker_macs  }}"
   when: 
-    - worker_names is defined
+    - WORKER_NAMES is defined
     - NUMBER_OF_WORKER_VMS !=0  
 
 - name: Build updated list
   ansible.builtin.set_fact:
     updated_list: "{{ updated_list|default([]) + [ merged_item ] }}"
-  loop: "{{ openshift_cluster_provision_params }}"
+  loop: "{{ OPENSHIFT_CLUSTER_PROVISION_PARAMS }}"
   loop_control:
     label: "{{ item.openshift_node_fqdn }}"
   vars:
@@ -57,7 +57,7 @@
               if item.openshift_control_node
               else (
                 worker_macs[item.openshift_node_fqdn][worker_macs[item.openshift_node_fqdn].keys()|list|first].mac
-                if (worker_names is defined and NUMBER_OF_WORKER_VMS != 0)
+                if (WORKER_NAMES is defined and NUMBER_OF_WORKER_VMS != 0)
                 else omit
               )
             )
@@ -65,10 +65,10 @@
       }}
   when: >-
     item.openshift_control_node or
-    (worker_names is defined and NUMBER_OF_WORKER_VMS != 0)
+    (WORKER_NAMES is defined and NUMBER_OF_WORKER_VMS != 0)
 
 
 
 - name: Update the original data structure
   ansible.builtin.set_fact:
-    openshift_cluster_provision_params: "{{ updated_list }}"
+    OPENSHIFT_CLUSTER_PROVISION_PARAMS: "{{ updated_list }}"
