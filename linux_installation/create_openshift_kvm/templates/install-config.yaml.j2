@@ -41,7 +41,7 @@ platform:
             address: "redfish-virtualmedia+http://{{ host.openshift_node_bmc.address }}:8000/redfish/v1/Systems/{{ lookup('vars', (host.openshift_node_fqdn | replace('-','_')) + '_uuid' ) }}"
             username: {{ host.openshift_node_bmc.username }}
             password: {{ host.openshift_node_bmc.password }}
-        bootMACAddress: {{ host.openshift_node_mac_address }}
+            bootMACAddress: "12:12:12:12:12"
         bootMode: {{ host.bootMode }}
         rootDeviceHints:
           deviceName: {{ host.openshift_node_install_device }}
@@ -53,6 +53,37 @@ platform:
                 - {{ ns }}
 {% endfor %}
           interfaces:
+{% if vlans.enabled %}
+            - name: {{ vlans.bond_name }}
+              state: up
+              type: bond
+              mtu: {{ vlans.mtu }}
+              ipv4:
+                enabled: false
+              ipv6:
+                enabled: false
+              link-aggregation:
+                mode: {{ vlans.bond_mode }}
+                options:
+                  miimon: '100'
+                port:
+{% for interface in vlans.bond_ports %}
+                - {{ interface }}
+{% endfor %}
+            - name: {{ vlans.bond_name }}.{{ vlans.machine_vlan_id }}
+              type: vlan
+              state: up
+              ipv4:
+                enabled: true
+                address:
+                - ip: {{ host.openshift_node_machine_ip_address }}
+                  prefix-length: {{ host.openshift_node_cidr }}
+              ipv6:
+                enabled: false
+              vlan:
+                base-iface: {{ vlans.bond_name }}
+                id: {{ vlans.machine_vlan_id }}
+{% else %}
             - name: {{ host.openshift_node_primary_nic }}
               state: up
               type: ethernet
@@ -62,13 +93,18 @@ platform:
                 address: 
                   - ip: {{ host.openshift_node_machine_ip_address }}
                     prefix-length: {{ host.openshift_node_cidr }}
+{% endif %}
               ipv6:
                 enabled: false
           routes:
             config:
               - destination: 0.0.0.0/0
                 next-hop-address: {{ host.openshift_node_gateway }}
+{% if vlans.enabled %}
+                next-hop-interface: {{ vlans.bond_name }}.{{ vlans.machine_vlan_id }}
+{% else %}
                 next-hop-interface: {{ host.openshift_node_primary_nic }}
+{% endif %}
 {% endfor %} 
 proxy:
   httpsProxy: {{ HTTPS_PROXY }}
