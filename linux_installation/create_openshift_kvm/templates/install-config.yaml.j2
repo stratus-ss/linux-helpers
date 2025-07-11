@@ -41,7 +41,7 @@ platform:
             address: "redfish-virtualmedia+http://{{ host.openshift_node_bmc.address }}:8000/redfish/v1/Systems/{{ lookup('vars', (host.openshift_node_fqdn | replace('-','_')) + '_uuid' ) }}"
             username: {{ host.openshift_node_bmc.username }}
             password: {{ host.openshift_node_bmc.password }}
-            bootMACAddress: "12:12:12:12:12"
+        bootMACAddress: {{ host.openshift_node_mac_address }}
         bootMode: {{ host.bootMode }}
         rootDeviceHints:
           deviceName: {{ host.openshift_node_install_device }}
@@ -60,8 +60,6 @@ platform:
               mtu: {{ vlans.mtu }}
               ipv4:
                 enabled: false
-              ipv6:
-                enabled: false
               link-aggregation:
                 mode: {{ vlans.bond_mode }}
                 options:
@@ -78,8 +76,6 @@ platform:
                 address:
                 - ip: {{ host.openshift_node_machine_ip_address }}
                   prefix-length: {{ host.openshift_node_cidr }}
-              ipv6:
-                enabled: false
               vlan:
                 base-iface: {{ vlans.bond_name }}
                 id: {{ vlans.machine_vlan_id }}
@@ -111,7 +107,12 @@ proxy:
   httpProxy: {{ HTTP_PROXY }}
   noProxy: {{ NO_PROXY }}
  
+{% if additional_trust_bundle is defined and additional_trust_bundle |length > 0 %}
+additionalTrustBundle: |
+{{ additional_trust_bundle | indent(4)}}
+{% else %}
 additionalTrustBundle: ''
+{%endif %}
  
 pullSecret: '{{ PULL_SECRET }}'
  
