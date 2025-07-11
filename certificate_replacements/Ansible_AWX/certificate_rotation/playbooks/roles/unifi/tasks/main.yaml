@@ -1,0 +1,23 @@
+---
+# roles/unifi/tasks/main.yml
+- name: Copy certificate files to certs directory
+  copy:
+    src: "{{ cert_dir }}/{{ item.src }}"
+    dest: "/etc/ssl/certs/{{ item.src }}"
+    mode: '0600'
+  loop:
+    - { src: "cert.pem" }
+    - { src: "fullchain.pem" }
+  delegate_to: "{{ unifi_host }}"
+
+- name: Copy private key
+  copy:
+    src: "{{ cert_dir }}/privkey.pem"
+    dest: "/etc/ssl/private/privkey.pem"
+    mode: '0600'
+  delegate_to: "{{ unifi_host }}"
+
+- name: Import SSL certificate
+  command:
+    cmd: "/usr/local/bin/unifi_ssl_import.sh"
+  delegate_to: "{{ unifi_host }}"
