@@ -8,8 +8,8 @@ BOOTSTRAP_DNS: 10.11.94.7
 CLUSTER_NAME: zzzzz
 CLUSTER_NETWORK: 172.30.0.0/16
 DNS_NAMESERVER: 10.11.94.7
-HTTPS_PROXY: 
-HTTP_PROXY: 
+HTTPS_PROXY: "http://mirror-registry.ocp4.example.com:3128"
+HTTP_PROXY: "http://mirror-registry.ocp4.example.com:3128"
 INSTALL_USER: ocp
 INSTALL_USER_BINARY_PATH: "/home/{{ INSTALL_USER }}/.local/bin/"
 OPENSHIFT_VERSION: 4.17.11
@@ -20,7 +20,7 @@ NETWORK_BRIDGE: br0
 NETWORK_INTERFACE: enp1s0
 NETWORK_GATEWAY: 10.11.94.7
 NETWOKR_CIDR: 23
-NO_PROXY: localhost,127.0.0.1
+NO_PROXY: localhost,127.0.0.1,api.openshift.com,example.com
 NUMBER_OF_MASTER_VMS: 3
 NUMBER_OF_WORKER_VMS: 0
 MACHINE_NETWORK: 10.11.94.0/23
@@ -28,6 +28,11 @@ PULL_SECRET: ''
 SSH_KEY: ""
 SERVICE_NETWORK: 172.29.0.0/20
 SUSHY_SERVER: 10.11.94.1
+
+additional_trust_bundle: |
+    -----BEGIN CERTIFICATE-----
+    EXAMPLE
+    -----END CERTIFICATE-----
 
 kvm_packages:
   - qemu-kvm
