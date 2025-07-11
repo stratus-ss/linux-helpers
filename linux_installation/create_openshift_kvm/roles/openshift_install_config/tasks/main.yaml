@@ -1,6 +1,6 @@
-- name: debug openshift_cluster_provision_params
+- name: debug OPENSHIFT_CLUSTER_PROVISION_PARAMS
   debug:
-    msg: "{{ openshift_cluster_provision_params }}"
+    msg: "{{ OPENSHIFT_CLUSTER_PROVISION_PARAMS }}"
 
 - name: Generate cluster-config.yaml
   ansible.builtin.template:

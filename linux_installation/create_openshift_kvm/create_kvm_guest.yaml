@@ -19,7 +19,7 @@
         - name: Create Control Plane VMs
           ansible.builtin.include_role:
             name: create_kvm_guest
-          loop: "{{ control_plane_names }}"
+          loop: "{{ CONTROL_PLANE_NAMES }}"
           loop_control:
             loop_var: vm_name
           when: vm_name not in existing_vms.list_vms
@@ -27,12 +27,12 @@
         - name: Create Worker Plane VMs
           ansible.builtin.include_role:
             name: create_kvm_guest
-          loop: "{{ worker_names }}"
+          loop: "{{ WORKER_NAMES }}"
           loop_control:
             loop_var: vm_name
           when: 
             - vm_name not in existing_vms.list_vms 
-            - worker_names is defined 
+            - WORKER_NAMES is defined 
             - NUMBER_OF_WORKER_VMS !=0
       when: install_libvirt| default(false) | bool
 
@@ -41,7 +41,7 @@
         command: uuid
         name: "{{ vm_name }}"
       register: control_plane_info
-      loop: "{{ control_plane_names }}"
+      loop: "{{ CONTROL_PLANE_NAMES }}"
       loop_control:
         loop_var: vm_name
     
@@ -50,11 +50,11 @@
         command: uuid
         name: "{{ vm_name }}"
       register: worker_info
-      loop: "{{ worker_names }}"
+      loop: "{{ WORKER_NAMES }}"
       loop_control:
         loop_var: vm_name
       when: 
-        - worker_names is defined
+        - WORKER_NAMES is defined
         - NUMBER_OF_WORKER_VMS !=0
 
     - name: Set UUID variables for control plane VMs
@@ -67,7 +67,7 @@
         "{{ item.vm_name | replace('-','_') }}_uuid": "{{ item.uuid }}"
       loop: "{{ worker_info.results }}"
       when: 
-        - worker_names is defined
+        - WORKER_NAMES is defined
         - NUMBER_OF_WORKER_VMS !=0
 
     - name: Display only UUID variables
