@@ -182,12 +182,12 @@
     owner: "{{ username }}"
     group: "{{ username }}"
   loop:
-    - /home/stratus/Downloads
+    - /home/{{ username }}/Downloads
     - /var/cache/pacman/pkg
-    - /home/stratus/Documents
+    - /home/{{ username }}/Documents
     - /home/stratus/OBS
     - /1TB_nvme
-    - /home/stratus/Games
+    - /home/{{ username }}/Games
   when:
     - update_fstab | bool
 

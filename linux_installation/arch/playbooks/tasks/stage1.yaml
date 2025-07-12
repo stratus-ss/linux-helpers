@@ -53,7 +53,8 @@
         state: "opened"
         name: "{{ luks_volume_name }}"
         passphrase: "{{ luks_passphrase }}"
-
+      when: use_luks | default(false) | bool
+      
     - name: Load ZFS module
       modprobe:
         name: zfs

@@ -1,3 +1,4 @@
+amdgpu_fix: false
 auto_start_app: false
 custom_firefox_icon: true
 desktop_name: cinnamon
