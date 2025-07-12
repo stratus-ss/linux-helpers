@@ -115,14 +115,14 @@
   git:
     repo: https://aur.archlinux.org/yay-git.git
     dest: /home/{{ username }}/yay
-  become: yes
+  become: true
   become_user: "{{ username }}"
 
 - name: Build and install yay
   command: makepkg -si --noconfirm
   args:
     chdir: /home/{{ username }}/yay
-  become: yes
+  become: true
   become_user: "{{ username }}"
 
 - name: Set timezone

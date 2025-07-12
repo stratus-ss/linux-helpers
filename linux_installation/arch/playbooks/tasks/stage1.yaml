@@ -1,7 +1,7 @@
 ---
 - name: Configure ZFS on Arch Linux
   hosts: localhost
-  become: yes
+  become: true
   vars_files:
     - ../vars.yaml
 
@@ -54,7 +54,7 @@
         name: "{{ luks_volume_name }}"
         passphrase: "{{ luks_passphrase }}"
       when: use_luks | default(false) | bool
-      
+
     - name: Load ZFS module
       modprobe:
         name: zfs

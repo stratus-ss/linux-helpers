@@ -1,6 +1,6 @@
 
 - name: Install Nvidia Open
-  become: yes
+  become: true
   become_user: "{{ username }}"
   kewlfft.aur.aur:
     use: yay
@@ -13,7 +13,7 @@
     - nvidia_open | bool
 
 - name: Install Nvidia LTS
-  become: yes
+  become: true
   become_user: "{{ username }}"
   kewlfft.aur.aur:
     use: yay
@@ -26,7 +26,7 @@
     - nvidia_lts | bool
 
 - name: Install Nvidia DKMS
-  become: yes
+  become: true
   become_user: "{{ username }}"
   kewlfft.aur.aur:
     use: yay
@@ -39,7 +39,7 @@
     - nvidia_dkms | bool
 
 - name: Install Flatpak
-  become: yes
+  become: true
   become_user: "{{ username }}"
   kewlfft.aur.aur:
     use: yay
@@ -60,7 +60,7 @@
     - faillock_increase | bool
 
 - name: Install Desktop packages
-  become: yes
+  become: true
   become_user: "{{ username }}"
   kewlfft.aur.aur:
     use: yay
