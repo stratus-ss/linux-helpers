@@ -15,7 +15,7 @@
     upgrade: true
 
 - name: Install ZFS packages
-  become: yes
+  become: true
   become_user: "{{ username }}"
   kewlfft.aur.aur:
     use: yay
@@ -24,6 +24,7 @@
       - sanoid
       - zfs-linux-lts
       - zfsbootmenu
+      - zfs-utils
     state: present
     update_cache: true
 
