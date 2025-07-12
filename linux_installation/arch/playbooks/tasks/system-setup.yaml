@@ -42,6 +42,7 @@
     src: "{{ nfs_path }}"
     fstype: nfs
     state: mounted
+    opts: nfsvers=3
   when:
     - network_pacman_cache | bool
     
