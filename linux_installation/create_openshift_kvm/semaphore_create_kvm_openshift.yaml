@@ -285,6 +285,11 @@
   vars_files:
     vars.yaml
   tasks:
+    - name: Install HVAC requirement to interact with Vault
+      ansible.builtin.package:
+        name: python3-hvac
+        state: present
+        
     - name: Ensure REMOTE {{ CLUSTER_NAME }} Directory Exists
       ansible.builtin.file:
         path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
