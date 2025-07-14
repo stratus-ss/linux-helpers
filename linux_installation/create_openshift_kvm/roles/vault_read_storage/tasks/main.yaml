@@ -15,5 +15,5 @@
     
     - name: Debug the variable
       ansible.builtin.debug:
-        var: fact_var_name
+        msg: "{{ vars[fact_var_name] }}"
       when: DEBUG is defined and DEBUG | bool
