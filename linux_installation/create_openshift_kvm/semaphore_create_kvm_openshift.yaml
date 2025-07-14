@@ -263,7 +263,7 @@
       ansible.builtin.include_role:
         name: vault_write_storage
       vars:
-        file_name: install-config.yaml
+        vault_secret_key_name: install-config
         full_path_to_file: '{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml'
 
 - name: Configure DNS
