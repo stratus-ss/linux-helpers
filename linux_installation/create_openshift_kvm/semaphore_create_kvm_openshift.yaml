@@ -250,7 +250,7 @@
     - name: Set Host Interface Facts
       ansible.builtin.include_role:
         name: get_network_interfaces 
-        
+
     - name: Ensure LOCAL {{ CLUSTER_NAME }} Directory Exists
       ansible.builtin.file:
         path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
@@ -317,7 +317,6 @@
     - name: Sleep for 30 seconds and continue with play
       ansible.builtin.wait_for:
         timeout: 30
-      delegate_to: localhost
 
     - name: Launch OpenShift Installer
       become: true
