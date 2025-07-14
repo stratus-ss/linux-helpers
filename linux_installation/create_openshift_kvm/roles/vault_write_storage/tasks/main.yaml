@@ -10,8 +10,8 @@
       - key: "{{ file_name }}"
         value: "{{ slurped_install_config.content }}"
 
-- debug:
-  var: vault_dict
+- ansible.builtin.debug:
+    var: vault_dict
 
 - name: Store files in HashiCorp Vault
   community.hashi_vault.vault_write:
