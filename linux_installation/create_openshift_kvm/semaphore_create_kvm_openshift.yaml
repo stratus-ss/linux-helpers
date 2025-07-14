@@ -251,9 +251,6 @@
       ansible.builtin.include_role:
         name: get_network_interfaces 
 
-    - name: Create install-config.yaml
-      ansible.builtin.include_role:
-        name: openshift_install_config
 
 - name: Configure DNS
   hosts: dns
