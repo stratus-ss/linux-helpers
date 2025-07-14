@@ -241,19 +241,7 @@
       debug:
         msg: "{{ item }}: {{ hostvars[inventory_hostname][item] }}"
       loop: "{{ hostvars[inventory_hostname] | dict2items | selectattr('key', 'match', '.*_uuid$') | map(attribute='key') | list }}"
-
-    - name: Ensure LOCAL {{ CLUSTER_NAME }} Directory Exists
-      ansible.builtin.file:
-        path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
-        state: directory
-        
-    - name: Save Install Config
-      ansible.builtin.include_role:
-        name: vault_write_storage
-      vars:
-        file_name: install-config.yaml
-        full_path_to_file: '{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml'
-    
+   
     - name: Configure RedFish for KVM
       ansible.builtin.include_role:
         name: sushy_tools_setup
@@ -290,7 +278,7 @@
       ansible.builtin.file:
         path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
         state: directory
-        owner: "{{ INSTALL_USER }}"  
+        owner: "{{ INSTALL_USER }}"
       
     - name: Copy install-config.yaml to bastion
       copy:
