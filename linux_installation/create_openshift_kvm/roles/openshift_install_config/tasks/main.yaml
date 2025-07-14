@@ -7,6 +7,11 @@
     path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
     state: directory
 
+- name: Remove any previous version
+  ansible.builtin.file:
+    path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}install-config.yaml"
+    state: absent
+
 - name: Generate cluster-config.yaml
   ansible.builtin.template:
     src: install-config.yaml.j2
