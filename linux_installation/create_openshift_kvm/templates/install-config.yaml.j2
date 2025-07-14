@@ -114,6 +114,6 @@ additionalTrustBundle: |
 additionalTrustBundle: ''
 {%endif %}
  
-pullSecret: "{{ PULL_SECRET }}"
+pullSecret: {% raw %}'{{ PULL_SECRET }}'{% endraw %}
  
 sshKey: '{{ SSH_KEY }}'
