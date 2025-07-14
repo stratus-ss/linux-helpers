@@ -340,7 +340,8 @@
     - name: Sleep for 30 seconds and continue with play
       ansible.builtin.wait_for:
         timeout: 30
-
+      when: SLEEP is defined and SLEEP | bool
+      
     - name: Launch OpenShift Installer
       become: true
       become_user: "{{ INSTALL_USER }}"
