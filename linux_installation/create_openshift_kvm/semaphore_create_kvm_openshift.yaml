@@ -291,6 +291,19 @@
         state: directory
         owner: "{{ INSTALL_USER }}"
 
+    - name: Get Install Config From Vault
+      ansible.builtin.include_role:
+        name: vault_read_storage
+      vars:
+        vault_path: "configs/data/{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+        fact_var_name: "INSTALL_CONFIG"
+        certificate_data_path: "data.data.data.install-config.yaml"
+        decode_certificate: true    
+
+    - name: Write retrieved certificate to local file
+      copy:
+        dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
+        content: "{{ INSTALL_CONFIG }}"
 
 
     - name: Decide Which Binary to install with
