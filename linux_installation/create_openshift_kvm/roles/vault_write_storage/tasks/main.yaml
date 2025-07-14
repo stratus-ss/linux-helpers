@@ -12,6 +12,7 @@
 
 - ansible.builtin.debug:
     var: vault_dict
+  when: DEBUG is defined and DEBUG | bool
 
 - name: Store files in HashiCorp Vault
   community.hashi_vault.vault_write:
