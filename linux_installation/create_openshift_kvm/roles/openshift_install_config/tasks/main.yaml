@@ -11,4 +11,5 @@
   ansible.builtin.template:
     src: install-config.yaml.j2
     dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
-
+    mode: '0644'
+    owner: "{{ INSTALL_USER }}" 
