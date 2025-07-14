@@ -2,7 +2,13 @@
   debug:
     msg: "{{ OPENSHIFT_CLUSTER_PROVISION_PARAMS }}"
 
+- name: Ensure LOCAL {{ CLUSTER_NAME }} Directory Exists
+  ansible.builtin.file:
+    path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
+    state: directory
+
 - name: Generate cluster-config.yaml
   ansible.builtin.template:
     src: install-config.yaml.j2
-    dest: "/home/{{ INSTALL_USER }}/{{ CLUSTER_NAME }}/install-config.yaml"
+    dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
+
