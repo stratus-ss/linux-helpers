@@ -1,0 +1,7 @@
+collections:
+  - name: community.general
+  - name: community.hashi_vault
+  - name: community.libvirt
+  - name: community.crypto
+  - name: ansible.utils
+  - name: git+https://github.com/stratus-ss/pfsensible.git,preserve_unbound_hosts
