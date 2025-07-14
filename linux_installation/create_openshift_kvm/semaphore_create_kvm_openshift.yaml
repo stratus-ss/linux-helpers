@@ -279,13 +279,11 @@
         path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
         state: directory
         owner: "{{ INSTALL_USER }}"
-      
-    - name: Copy install-config.yaml to bastion
-      copy:
-        src: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
-        dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
-        mode: '0644'
-        owner: "{{ INSTALL_USER }}" 
+
+    - name: Create install-config.yaml
+      ansible.builtin.include_role:
+        name: openshift_install_config
+
     - name: Decide Which Binary to install with
       ansible.builtin.set_fact:
         OPENSHIFT_INSTALL_BINARY:  "{{ 'openshift-baremetal-install' if OPENSHIFT_BAREMETAL_INSTALL | default(false) | bool else 'openshift-install' }}"  
