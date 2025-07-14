@@ -22,6 +22,7 @@
 - name: show variable
   debug:
     msg: "{{ OPENSHIFT_CLUSTER_PROVISION_PARAMS }}"
+  when: DEBUG is defined and DEBUG | bool
 
 - name: Create dictionary for control plane MAC addresses keyed by vm_name
   ansible.builtin.set_fact:

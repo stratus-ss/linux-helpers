@@ -1,6 +1,7 @@
 - name: debug OPENSHIFT_CLUSTER_PROVISION_PARAMS
   debug:
     msg: "{{ OPENSHIFT_CLUSTER_PROVISION_PARAMS }}"
+  when: DEBUG is defined and DEBUG | bool
 
 - name: Ensure LOCAL {{ CLUSTER_NAME }} Directory Exists
   ansible.builtin.file:

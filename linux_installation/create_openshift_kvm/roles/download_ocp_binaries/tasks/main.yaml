@@ -44,6 +44,7 @@
   - name: show release
     debug:
       msg: "{{ release_content }}"
+    when: DEBUG is defined and DEBUG | bool
 
   - name: Extract release image URL
     ansible.builtin.set_fact:
