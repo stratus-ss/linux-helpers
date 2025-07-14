@@ -1,9 +1,17 @@
 ---
-- name: create the data dict for Vault
-  ansible.builtin.set_fact:
+- name: Slurp install-config.yaml from remote host
+  slurp:
+    src: "{{ full_path_to_file }}"
+  register: slurped_install_config
+
+- name: Set vault_dict fact for Vault
+  set_fact:
     vault_dict:
       - key: "{{ file_name }}"
-        value: "{{ lookup('file', full_path_to_file ) | b64encode }}"
+        value: "{{ slurped_install_config.content }}"
+
+- debug:
+  var: vault_dict
 
 - name: Store files in HashiCorp Vault
   community.hashi_vault.vault_write:
