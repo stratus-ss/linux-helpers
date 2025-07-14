@@ -1,6 +1,6 @@
 ---
 - name: Create VM on KVM Host
-  hosts: localhost
+  hosts: kvm
   gather_facts: false
   vars_files:
     - vars.yaml
