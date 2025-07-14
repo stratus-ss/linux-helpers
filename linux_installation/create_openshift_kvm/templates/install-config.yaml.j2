@@ -14,7 +14,7 @@ metadata:
 networking:
   clusterNetwork:
   - cidr: {{ CLUSTER_NETWORK }}
-    hostPrefix: 23
+    hostPrefix: {{ NETWOKR_CIDR }}
   machineNetwork:
   - cidr: {{ MACHINE_NETWORK }}
   networkType: OVNKubernetes
