@@ -109,7 +109,7 @@ proxy:
  
 {% if ADDITIONAL_TRUST_BUNDLE is defined and ADDITIONAL_TRUST_BUNDLE |length > 0 %}
 additionalTrustBundle: |
-{{ ADDITIONAL_TRUST_BUNDLE | indent(4)}}
+    {{ ADDITIONAL_TRUST_BUNDLE | indent(4)}}
 {% else %}
 additionalTrustBundle: ''
 {%endif %}
