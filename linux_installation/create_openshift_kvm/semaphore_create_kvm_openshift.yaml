@@ -263,7 +263,7 @@
       ansible.builtin.include_role:
         name: vault_write_storage
       vars:
-        vault_secret_key_name: install-config
+        vault_secret_key_name: install_config
         full_path_to_file: '{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml'
 
 - name: Configure DNS
@@ -289,7 +289,7 @@
       ansible.builtin.package:
         name: python3-hvac
         state: present
-        
+
     - name: Ensure REMOTE {{ CLUSTER_NAME }} Directory Exists
       ansible.builtin.file:
         path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
@@ -302,7 +302,7 @@
       vars:
         vault_path: "configs/data/{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
         fact_var_name: "INSTALL_CONFIG"
-        certificate_data_path: "data.data.data.install-config.yaml"
+        certificate_data_path: "data.data.data.install_config"
         decode_certificate: true    
 
     - name: Write retrieved certificate to local file
