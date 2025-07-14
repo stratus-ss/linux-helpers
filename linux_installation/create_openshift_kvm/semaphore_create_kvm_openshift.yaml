@@ -151,7 +151,7 @@
           vault_path: "credentials/data/OpenShift_Pull"
           fact_var_name: "PULL_SECRET"
           certificate_data_path: "data.data.data.pull_secret"
-          decode_certificate: false
+          decode_certificate: true
       
       - name: Get Mirror Registry Cert
         ansible.builtin.include_role:
@@ -295,6 +295,11 @@
         path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
         state: directory
         owner: "{{ INSTALL_USER }}"
+
+    - name: remove any previous install configs
+      ansible.builtin.file:
+        path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
+        state: absent
 
     - name: Get Install Config From Vault
       ansible.builtin.include_role:
