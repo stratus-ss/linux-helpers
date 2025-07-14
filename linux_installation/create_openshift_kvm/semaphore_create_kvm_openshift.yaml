@@ -250,7 +250,21 @@
     - name: Set Host Interface Facts
       ansible.builtin.include_role:
         name: get_network_interfaces 
+        
+    - name: Ensure LOCAL {{ CLUSTER_NAME }} Directory Exists
+      ansible.builtin.file:
+        path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}"
+        state: directory
+    - name: Create install-config.yaml
+      ansible.builtin.include_role:
+        name: openshift_install_config
 
+    - name: Save Install Config
+      ansible.builtin.include_role:
+        name: vault_write_storage
+      vars:
+        file_name: install-config.yaml
+        full_path_to_file: '{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml'
 
 - name: Configure DNS
   hosts: dns
@@ -277,9 +291,7 @@
         state: directory
         owner: "{{ INSTALL_USER }}"
 
-    - name: Create install-config.yaml
-      ansible.builtin.include_role:
-        name: openshift_install_config
+
 
     - name: Decide Which Binary to install with
       ansible.builtin.set_fact:
