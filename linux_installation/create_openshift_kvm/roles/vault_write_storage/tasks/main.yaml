@@ -7,7 +7,7 @@
 - name: Set vault_dict fact for Vault
   set_fact:
     vault_dict:
-      - key: "{{ file_name }}"
+      - key: "{{ vault_secret_key_name }}"
         value: "{{ slurped_install_config.content }}"
 
 - ansible.builtin.debug:
