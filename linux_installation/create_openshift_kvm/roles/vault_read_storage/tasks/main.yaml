@@ -11,4 +11,9 @@
 
     - name: Decode certificate if needed
       set_fact:
-        "{{ fact_var_name }}": "{{ (vault_cert_read | json_query(certificate_data_path) | b64decode | trim) if decode_certificate else (vault_cert_read | json_query(certificate_data_path) | trim) }}"
+        "{{ fact_var_name }}": >-
+           {{ 
+           (vault_cert_read | json_query(certificate_data_path) | b64decode | trim)
+           if decode_certificate 
+           else (vault_cert_read | json_query(certificate_data_path) | trim) | replace('\"', '\\\"')
+           }}
