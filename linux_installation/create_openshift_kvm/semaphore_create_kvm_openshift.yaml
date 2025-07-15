@@ -43,7 +43,7 @@
         NETWORK_BRIDGE: br0
         NETWORK_INTERFACE: enp1s0
         NETWORK_GATEWAY: 10.0.1.7
-        NETWOKR_CIDR: 22
+        NETWORK_CIDR: 22
         NO_PROXY: localhost,127.0.0.1,api.openshift.com,example.com
         NUMBER_OF_MASTER_VMS: 3
         NUMBER_OF_WORKER_VMS: 0
@@ -83,7 +83,7 @@
               address: "{{ SUSHY_SERVER }}"
               username: admin
               password: password123
-            openshift_node_cidr: "{{ NETWOKR_CIDR }}"
+            openshift_node_cidr: "{{ NETWORK_CIDR }}"
             openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[0] }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
@@ -97,7 +97,7 @@
               address: "{{ SUSHY_SERVER }}"
               username: admin
               password: password123
-            openshift_node_cidr: "{{ NETWOKR_CIDR }}"
+            openshift_node_cidr: "{{ NETWORK_CIDR }}"
             openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[1] }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
@@ -111,7 +111,7 @@
               address: "{{ SUSHY_SERVER }}"
               username: admin
               password: password123
-            openshift_node_cidr: "{{ NETWOKR_CIDR }}"
+            openshift_node_cidr: "{{ NETWORK_CIDR }}"
             openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[2] }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
@@ -125,7 +125,7 @@
               address: "{{ SUSHY_SERVER }}"
               username: admin
               password: password123
-            openshift_node_cidr: "{{ NETWOKR_CIDR }}"
+            openshift_node_cidr: "{{ NETWORK_CIDR }}"
             openshift_node_fqdn: "{{ WORKER_NAMES[0] }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
