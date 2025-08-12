@@ -38,7 +38,7 @@ platform:
       - name: {{ host.openshift_node_fqdn }}
         role: {{ 'master' if host.openshift_control_node else 'worker' }}
         bmc:
-            address: "redfish-virtualmedia+http://{{ host.openshift_node_bmc.address }}:8000/redfish/v1/Systems/{{ lookup('vars', (host.openshift_node_fqdn | replace('-','_')) + '_uuid' ) }}"
+            address: "redfish-virtualmedia+http://{{ host.openshift_node_bmc.address }}:8000/redfish/v1/Systems/{{ lookup('vars', (host.openshift_node_shortname | replace('-','_')) + '_uuid' ) }}"
             username: {{ host.openshift_node_bmc.username }}
             password: {{ host.openshift_node_bmc.password }}
         bootMACAddress: {{ host.openshift_node_mac_address }}

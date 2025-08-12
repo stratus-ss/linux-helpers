@@ -13,7 +13,7 @@
     path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}install-config.yaml"
     state: absent
 
-- name: Generate cluster-config.yaml
+- name: Generate install-config.yaml
   ansible.builtin.template:
     src: install-config.yaml.j2
     dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
