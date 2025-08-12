@@ -53,9 +53,8 @@
         SERVICE_NETWORK: 172.29.0.0/20
         SUSHY_SERVER: 10.0.1.1
         VM_BRIDGE_INTERFACE: 
-          - bridge-94
-          - bridge-99
-        VM_RAM_MB: 16384
+          - br-vlan
+        VM_RAM_MB: 20480
         VM_vCPUS: 6
         VM_OS: rhel9.2.0
         CONTROL_PLANE_NAMES:
