@@ -59,13 +59,13 @@
         VM_vCPUS: 6
         VM_OS: rhel9.2.0
         CONTROL_PLANE_NAMES:
-          - ocp-control1.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
-          - ocp-control2.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
-          - ocp-control3.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
+          - ocp-control1
+          - ocp-control2
+          - ocp-control3
         WORKER_NAMES:
-          - ocp-worker1.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
-          - ocp-worker2.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
-          - ocp-worker3.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
+          - ocp-worker1
+          - ocp-worker2
+          - ocp-worker3
         VLANS:
             enabled: true
             bond_ports:
@@ -84,7 +84,7 @@
               username: admin
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[0] }}"
+            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[0] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
@@ -98,7 +98,7 @@
               username: admin
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[1] }}"
+            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[1] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
@@ -112,7 +112,7 @@
               username: admin
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[2] }}"
+            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[2] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
@@ -126,7 +126,7 @@
               username: admin
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_fqdn: "{{ WORKER_NAMES[0] }}"
+            openshift_node_fqdn: "{{ WORKER_NAMES[0] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
