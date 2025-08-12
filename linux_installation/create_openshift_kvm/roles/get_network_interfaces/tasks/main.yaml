@@ -24,13 +24,39 @@
     msg: "{{ OPENSHIFT_CLUSTER_PROVISION_PARAMS }}"
   when: DEBUG is defined and DEBUG | bool
 
-- name: Create dictionary for control plane MAC addresses keyed by vm_name
+# - name: Create dictionary for control plane MAC addresses keyed by vm_name
+#   ansible.builtin.set_fact:
+#     control_plane_macs: "{{ dict(CONTROL_PLANE_NAMES | zip(control_plane_info.results | map(attribute='network_interfaces'))) }}"
+
+- name: Create dictionary for control plane MAC addresses keyed by FQDN
   ansible.builtin.set_fact:
-    control_plane_macs: "{{ dict(CONTROL_PLANE_NAMES | zip(control_plane_info.results | map(attribute='network_interfaces'))) }}"
+    control_plane_macs: >-
+      {{
+        dict(
+          CONTROL_PLANE_NAMES
+          | map('regex_replace', '^(.*)$', '\1.' ~ CLUSTER_NAME ~ '.' ~ BASE_DOMAIN)
+          | zip(control_plane_info.results | map(attribute='network_interfaces'))
+        )
+      }}
+
+
+# - name: Create dictionary for worker MAC addresses keyed by vm_name
+#   ansible.builtin.set_fact:
+#     worker_macs: "{{ dict(WORKER_NAMES | zip(worker_info.results | map(attribute='network_interfaces'))) }}"
+#   when: 
+#     - WORKER_NAMES is defined
+#     - NUMBER_OF_WORKER_VMS !=0
 
 - name: Create dictionary for worker MAC addresses keyed by vm_name
   ansible.builtin.set_fact:
-    worker_macs: "{{ dict(WORKER_NAMES | zip(worker_info.results | map(attribute='network_interfaces'))) }}"
+    control_plane_macs: >-
+      {{
+        dict(
+          WORKER_NAMES
+          | map('regex_replace', '^(.*)$', '\1.' ~ CLUSTER_NAME ~ '.' ~ BASE_DOMAIN)
+          | zip(worker_info.results | map(attribute='network_interfaces'))
+        )
+      }}
   when: 
     - WORKER_NAMES is defined
     - NUMBER_OF_WORKER_VMS !=0
