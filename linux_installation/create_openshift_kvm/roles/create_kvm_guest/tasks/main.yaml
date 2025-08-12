@@ -4,10 +4,21 @@
     src: vm_template.xml.j2
     dest: "/tmp/{{ vm_name }}.xml"
 
+- name: Read VM XML definition
+  ansible.builtin.slurp:
+    src: "/tmp/{{ vm_name }}.xml"
+  register: vm_xml_content
+
+# - name: Define VM
+#   community.libvirt.virt:
+#     command: define
+#     xml: "{{ lookup('file', '/tmp/' + vm_name + '.xml') }}"
+#     uri: qemu:///system
+
 - name: Define VM
   community.libvirt.virt:
     command: define
-    xml: "{{ lookup('file', '/tmp/' + vm_name + '.xml') }}"
+    xml: "{{ vm_xml_content.content | b64decode }}"
     uri: qemu:///system
 
 - name: register vm info
