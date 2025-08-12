@@ -24,15 +24,15 @@
 - name: register vm info
   community.libvirt.virt:
     command: get_interfaces
-    name: "{{ vm_name }}"
+    name: "{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
   register: vminfo
 
 - name: Create the disk image file
-  ansible.builtin.command: "qemu-img create -f qcow2 {{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.qcow2 {{ LIBVIRT_DISK_SIZE }}G"
+  ansible.builtin.command: "qemu-img create -f qcow2 {{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2 {{ LIBVIRT_DISK_SIZE }}G"
 
 - name: Set proper permissions on disk image
   ansible.builtin.file:
-    path: "{{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.qcow2"
+    path: "{{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2"
     owner: qemu
     group: qemu
     mode: '0660'
