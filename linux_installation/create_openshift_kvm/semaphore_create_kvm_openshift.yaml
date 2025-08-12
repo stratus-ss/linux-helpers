@@ -83,7 +83,8 @@
               username: admin
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[0] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+            openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[0] }}"
+            openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
@@ -97,7 +98,8 @@
               username: admin
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[1] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+            openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[1] }}"
+            openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
@@ -111,7 +113,8 @@
               username: admin
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[2] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+            openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[2] }}"
+            openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
@@ -125,7 +128,8 @@
               username: admin
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_fqdn: "{{ WORKER_NAMES[0] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+            openshift_node_shortname: "{{ WORKER_NAMES[0] }}"
+            openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
@@ -201,15 +205,6 @@
             - WORKER_NAMES is defined 
             - NUMBER_OF_WORKER_VMS !=0
       when: install_libvirt| default(false) | bool
-
-    - name: Debug the constructed FQDN for each control plane VM
-      ansible.builtin.debug:
-        msg: >
-          "{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-      loop: "{{ CONTROL_PLANE_NAMES }}"
-      loop_control:
-        loop_var: vm_name
-
 
     - name: register control plane info
       community.libvirt.virt:
