@@ -202,6 +202,15 @@
             - NUMBER_OF_WORKER_VMS !=0
       when: install_libvirt| default(false) | bool
 
+    - name: Debug the constructed FQDN for each control plane VM
+      ansible.builtin.debug:
+        msg: >
+          "{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+      loop: "{{ CONTROL_PLANE_NAMES }}"
+      loop_control:
+        loop_var: vm_name
+
+
     - name: register control plane info
       community.libvirt.virt:
         command: uuid
