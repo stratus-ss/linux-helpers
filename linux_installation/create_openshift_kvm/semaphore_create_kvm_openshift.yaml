@@ -84,7 +84,7 @@
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
             openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[0] }}"
-            openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[0] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
@@ -99,7 +99,7 @@
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
             openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[1] }}"
-            openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[1] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
@@ -114,7 +114,7 @@
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
             openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[2] }}"
-            openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[2] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
@@ -129,7 +129,7 @@
               password: password123
             openshift_node_cidr: "{{ NETWORK_CIDR }}"
             openshift_node_shortname: "{{ WORKER_NAMES[0] }}"
-            openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+            openshift_node_fqdn: "{{ WORKER_NAMES[0] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
             openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
             openshift_node_nameservers:
               - "{{ DNS_NAMESERVER }}"
