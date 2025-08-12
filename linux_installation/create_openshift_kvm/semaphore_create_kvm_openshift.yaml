@@ -59,13 +59,13 @@
         VM_vCPUS: 6
         VM_OS: rhel9.2.0
         CONTROL_PLANE_NAMES:
-          - ocp-control1
-          - ocp-control2
-          - ocp-control3
+          - ocp-control1.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
+          - ocp-control2.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
+          - ocp-control3.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
         WORKER_NAMES:
-          - ocp-worker1
-          - ocp-worker2
-          - ocp-worker3
+          - ocp-worker1.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
+          - ocp-worker2.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
+          - ocp-worker3.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
         VLANS:
             enabled: true
             bond_ports:
