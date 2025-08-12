@@ -1,7 +1,7 @@
 - name: register control plane info
   community.libvirt.virt:
     command: get_interfaces
-    name: "{{ vm_name }}"
+    name: "{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
   register: control_plane_info
   loop: "{{ CONTROL_PLANE_NAMES }}"
   loop_control:
@@ -10,7 +10,7 @@
 - name: register worker plane info
   community.libvirt.virt:
     command: get_interfaces
-    name: "{{ vm_name }}"
+    name: "{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
   register: worker_info
   loop: "{{ WORKER_NAMES }}"
   loop_control:
