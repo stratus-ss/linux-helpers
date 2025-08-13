@@ -1,34 +1,48 @@
 ---
+- name: Check if qcow2 disk image already exists
+  ansible.builtin.stat:
+    path: "{{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2"
+  register: disk_image_stat
+
+- name: Check if VM is already defined
+  community.libvirt.virt:
+    command: status
+    name: "{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+  register: vm_status
+  ignore_errors: true
+
 - name: Create VM XML definition
-  template:
+  ansible.builtin.template:
     src: vm_template.xml.j2
     dest: "/tmp/{{ vm_name }}.xml"
+  when: vm_status is failed
 
 - name: Read VM XML definition
   ansible.builtin.slurp:
     src: "/tmp/{{ vm_name }}.xml"
   register: vm_xml_content
-
-# - name: Define VM
-#   community.libvirt.virt:
-#     command: define
-#     xml: "{{ lookup('file', '/tmp/' + vm_name + '.xml') }}"
-#     uri: qemu:///system
+  when: vm_status is failed
 
 - name: Define VM
   community.libvirt.virt:
     command: define
     xml: "{{ vm_xml_content.content | b64decode }}"
     uri: qemu:///system
+  when: vm_status is failed
 
-- name: register vm info
-  community.libvirt.virt:
-    command: get_interfaces
-    name: "{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-  register: vminfo
+- name: Display disk image status
+  ansible.builtin.debug:
+    msg: >
+      Disk image {{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2 
+      {% if disk_image_stat.stat.exists %}already exists, skipping creation{% else %}does not exist, will create{% endif %}
 
-- name: Create the disk image file
-  ansible.builtin.command: "qemu-img create -f qcow2 {{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2 {{ LIBVIRT_DISK_SIZE }}G"
+- name: Create the disk image file ({{ LIBVIRT_DISK_SIZE }}GB)
+  ansible.builtin.command: >
+    qemu-img create -f qcow2 
+    {{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2 
+    {{ LIBVIRT_DISK_SIZE }}G
+  when: not disk_image_stat.stat.exists
+  register: qemu_img_result
 
 - name: Set proper permissions on disk image
   ansible.builtin.file:
@@ -36,13 +50,27 @@
     owner: qemu
     group: qemu
     mode: '0660'
+  # Always ensure correct permissions, whether file is new or existing
+
+- name: Register VM info (for both new and existing VMs)
+  community.libvirt.virt:
+    command: get_interfaces
+    name: "{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+  register: vminfo
 
 - name: Refresh the storage pool
   community.libvirt.virt_pool:
-      command: refresh
-      name: "{{ LIBVIRT_POOL_NAME }}"
+    command: refresh
+    name: "{{ LIBVIRT_POOL_NAME }}"
+  when: not disk_image_stat.stat.exists
 
 - name: Set interface and mac address facts for vm
-  set_fact:
+  ansible.builtin.set_fact:
     "{{ vm_name | replace('-','_') }}_interfaces": "{{ vminfo.network_interfaces }}"
-  
+
+- name: Verify VM creation completed successfully
+  ansible.builtin.debug:
+    msg: >
+      VM {{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 
+      {% if vm_status is failed %}has been created and defined successfully{% else %}was already defined, skipped creation{% endif %}.
+      MAC address: {{ vminfo.network_interfaces[vminfo.network_interfaces.keys()|list|first].mac if vminfo.network_interfaces else 'Not available' }}
