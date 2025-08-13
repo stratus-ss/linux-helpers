@@ -88,6 +88,7 @@
         index_var: node_index
         loop_var: node_name
       vars:
+        calculated_ip: "{{ MACHINE_IP_BASE }}.{{ (MACHINE_IP_START | int + node_index | int) | string }}"
         node_config:
           bootMode: legacy
           openshift_control_node: true
@@ -101,7 +102,7 @@
           openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
           openshift_node_nameservers:
             - "{{ DNS_NAMESERVER }}"
-          openshift_node_machine_ip_address: "{{ MACHINE_IP_BASE }}.{{ (MACHINE_IP_START + node_index) | string }}"
+          openshift_node_machine_ip_address: "{{ calculated_ip }}"
           openshift_node_install_device: /dev/vda
           openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
 
@@ -114,6 +115,7 @@
         index_var: node_index
         loop_var: node_name
       vars:
+        calculated_ip: "{{ MACHINE_IP_BASE }}.{{ (MACHINE_IP_START | int + NUMBER_OF_MASTER_VMS | int + node_index | int) | string }}"
         node_config:
           bootMode: legacy
           openshift_control_node: false
@@ -127,7 +129,7 @@
           openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
           openshift_node_nameservers:
             - "{{ DNS_NAMESERVER }}"
-          openshift_node_machine_ip_address: "{{ MACHINE_IP_BASE }}.{{ (MACHINE_IP_START + NUMBER_OF_MASTER_VMS + node_index) | string }}"
+          openshift_node_machine_ip_address: "{{ calculated_ip }}"
           openshift_node_install_device: /dev/vda
           openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
       when: 
