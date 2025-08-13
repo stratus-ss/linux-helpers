@@ -101,7 +101,7 @@
           openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
           openshift_node_nameservers:
             - "{{ DNS_NAMESERVER }}"
-          openshift_node_machine_ip_address: "{{ MACHINE_IP_BASE }}.{{ MACHINE_IP_START + node_index }}"
+          openshift_node_machine_ip_address: "{{ MACHINE_IP_BASE }}.{{ (MACHINE_IP_START + node_index) | string }}"
           openshift_node_install_device: /dev/vda
           openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
 
@@ -127,7 +127,7 @@
           openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
           openshift_node_nameservers:
             - "{{ DNS_NAMESERVER }}"
-          openshift_node_machine_ip_address: "{{ MACHINE_IP_BASE }}.{{ MACHINE_IP_START + NUMBER_OF_MASTER_VMS + node_index }}"
+          openshift_node_machine_ip_address: "{{ MACHINE_IP_BASE }}.{{ (MACHINE_IP_START + NUMBER_OF_MASTER_VMS + node_index) | string }}"
           openshift_node_install_device: /dev/vda
           openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
       when: 
