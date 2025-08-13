@@ -272,11 +272,19 @@
 - name: Configure DNS
   hosts: dns
   gather_facts: false
-  vars_files:
-    vars.yaml
   vars:
     create_dns: false
   tasks:
+    - name: Get cluster parameters from KVM host
+      set_fact:
+        OPENSHIFT_CLUSTER_PROVISION_PARAMS: "{{ hostvars[groups['kvm'][0]]['OPENSHIFT_CLUSTER_PROVISION_PARAMS'] }}"
+        CLUSTER_NAME: "{{ hostvars[groups['kvm'][0]]['CLUSTER_NAME'] }}"
+        BASE_DOMAIN: "{{ hostvars[groups['kvm'][0]]['BASE_DOMAIN'] }}"
+        API_VIP: "{{ hostvars[groups['kvm'][0]]['API_VIP'] }}"
+        APP_VIP: "{{ hostvars[groups['kvm'][0]]['APP_VIP'] }}"
+        BOOTSTRAP_STATIC_IP: "{{ hostvars[groups['kvm'][0]]['BOOTSTRAP_STATIC_IP'] }}"
+      when: create_dns| default(false)|bool
+
     - name: Creating DNS Entries...
       ansible.builtin.include_role:
         name: dns_settings_pfsense
@@ -285,9 +293,17 @@
 - name: Activate Bastion
   hosts: bastion
   gather_facts: true
-  vars_files:
-    vars.yaml
   tasks:
+    - name: Get cluster variables from KVM host
+      set_fact:
+        CLUSTER_NAME: "{{ hostvars[groups['kvm'][0]]['CLUSTER_NAME'] }}"
+        BASE_DOMAIN: "{{ hostvars[groups['kvm'][0]]['BASE_DOMAIN'] }}"
+        OPENSHIFT_INSTALL_DIRECTORY: "{{ hostvars[groups['kvm'][0]]['OPENSHIFT_INSTALL_DIRECTORY'] }}"
+        INSTALL_USER: "{{ hostvars[groups['kvm'][0]]['INSTALL_USER'] }}"
+        OPENSHIFT_BAREMETAL_INSTALL: "{{ hostvars[groups['kvm'][0]]['OPENSHIFT_BAREMETAL_INSTALL'] }}"
+        OPENSHIFT_VERSION: "{{ hostvars[groups['kvm'][0]]['OPENSHIFT_VERSION'] }}"
+        INSTALL_USER_BINARY_PATH: "{{ hostvars[groups['kvm'][0]]['INSTALL_USER_BINARY_PATH'] }}"
+
     - name: Install HVAC requirement to interact with Vault
       ansible.builtin.package:
         name: python3-hvac

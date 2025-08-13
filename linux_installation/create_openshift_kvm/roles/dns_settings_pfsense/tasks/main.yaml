@@ -14,7 +14,7 @@
     preserve: true
     state: present
     hosts:
-      - host: "{{ item.openshift_node_fqdn }}"
+      - host: "{{ item.openshift_node_shortname }}"
         domain: "{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
         ip: "{{ item.openshift_node_machine_ip_address }}"
         descr: "OCP {{ 'master' if item.openshift_control_node else 'worker' }}"
@@ -28,7 +28,7 @@
       local-zone: "api.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}" redirect
       local-data: "api.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 86400 IN A {{ API_VIP }}"
       local-zone: "apps.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}" redirect
-      local-data: "apps.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 86400 IN A {{ APPS_VIP }}"
+      local-data: "apps.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 86400 IN A {{ APP_VIP }}"
 
 - name: add domain overrides
   pfsensible.core.pfsense_dns_resolver:
