@@ -40,7 +40,7 @@
 - name: Refresh the storage pool
   community.libvirt.virt_pool:
       command: refresh
-      name: "{{ LIBVERT_POOL_NAME }}"
+      name: "{{ LIBVIRT_POOL_NAME }}"
 
 - name: Set interface and mac address facts for vm
   set_fact:

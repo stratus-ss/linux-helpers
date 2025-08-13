@@ -19,7 +19,7 @@ OPENSHIFT_INSTALL_DIRECTORY: "/home/{{ INSTALL_USER }}/{{ CLUSTER_NAME }}"
 NETWORK_BRIDGE: br0
 NETWORK_INTERFACE: enp1s0
 NETWORK_GATEWAY: 10.11.94.7
-NETWOKR_CIDR: 23
+NETWORK_CIDR: 23
 NO_PROXY: localhost,127.0.0.1,api.openshift.com,example.com
 NUMBER_OF_MASTER_VMS: 3
 NUMBER_OF_WORKER_VMS: 0
@@ -71,66 +71,6 @@ VLANS:
     machine_vlan_id: "94"
     mtu: "1500"
 
-BOND_SUBINTERFACE: "{{ bond_name }}.{{ machine_vlan_id }}"
+BOND_SUBINTERFACE: "{{ VLANS.bond_name }}.{{ VLANS.machine_vlan_id }}"
 
-OPENSHIFT_CLUSTER_PROVISION_PARAMS:
-  - bootMode: legacy
-    openshift_control_node: true
-    openshift_node_bmc:
-      address: "{{ SUSHY_SERVER }}"
-      username: admin
-      password: password123
-    openshift_node_cidr: "{{ NETWOKR_CIDR }}"
-    openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[0] }}"
-    openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-    openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
-    openshift_node_nameservers:
-      - "{{ DNS_NAMESERVER }}"
-    openshift_node_machine_ip_address: 10.11.95.1
-    openshift_node_install_device: /dev/vda
-    openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
-  - bootMode: legacy
-    openshift_control_node: true
-    openshift_node_bmc:
-      address: "{{ SUSHY_SERVER }}"
-      username: admin
-      password: password123
-    openshift_node_cidr: "{{ NETWOKR_CIDR }}"
-    openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[1] }}"
-    openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-    openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
-    openshift_node_nameservers:
-      - "{{ DNS_NAMESERVER }}"
-    openshift_node_machine_ip_address: 10.11.95.2
-    openshift_node_install_device: /dev/vda
-    openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
-  - bootMode: legacy
-    openshift_control_node: true
-    openshift_node_bmc:
-      address: "{{ SUSHY_SERVER }}"
-      username: admin
-      password: password123
-    openshift_node_cidr: "{{ NETWOKR_CIDR }}"
-    openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[2] }}"
-    openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-    openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
-    openshift_node_nameservers:
-      - "{{ DNS_NAMESERVER }}"
-    openshift_node_machine_ip_address: 10.11.95.3
-    openshift_node_install_device: /dev/vda
-    openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
-  - bootMode: legacy
-    openshift_control_node: false
-    openshift_node_bmc:
-      address: "{{ SUSHY_SERVER }}"
-      username: admin
-      password: password123
-    openshift_node_cidr: "{{ NETWOKR_CIDR }}"
-    openshift_node_shortname: "{{ WORKER_NAMES[0] }}"
-    openshift_node_fqdn: "{{ openshift_node_shortname }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"    
-    openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
-    openshift_node_nameservers:
-      - "{{ DNS_NAMESERVER }}"
-    openshift_node_machine_ip_address: 10.11.95.4
-    openshift_node_install_device: /dev/vda
-    openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
+# OPENSHIFT_CLUSTER_PROVISION_PARAMS is now dynamically generated in the main playbook

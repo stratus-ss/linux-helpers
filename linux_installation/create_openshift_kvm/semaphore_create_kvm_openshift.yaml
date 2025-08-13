@@ -32,7 +32,7 @@
           - qemu-kvm
           - libvirt
           - virt-install
-        LIBVERT_POOL_NAME: "vm-nvmes"
+        LIBVIRT_POOL_NAME: "vm-nvmes"
         LIBVIRT_POOL_DIRECTORY: "libvirt_nvmes"
         LIBVIRT_DISK_PATH: "/var/lib/{{ LIBVIRT_POOL_DIRECTORY }}"
         LIBVIRT_DISK_SIZE: 120
@@ -75,96 +75,94 @@
             mtu: "1500"
         BOND_SUBINTERFACE: "{{ VLANS.bond_name }}.{{ VLANS.machine_vlan_id }}"
 
-        OPENSHIFT_CLUSTER_PROVISION_PARAMS:
-          - bootMode: legacy
-            openshift_control_node: true
-            openshift_node_bmc:
-              address: "{{ SUSHY_SERVER }}"
-              username: admin
-              password: password123
-            openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[0] }}"
-            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[0] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-            openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
-            openshift_node_nameservers:
-              - "{{ DNS_NAMESERVER }}"
-            openshift_node_machine_ip_address: 10.0.2.1
-            openshift_node_install_device: /dev/vda
-            openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
-          - bootMode: legacy
-            openshift_control_node: true
-            openshift_node_bmc:
-              address: "{{ SUSHY_SERVER }}"
-              username: admin
-              password: password123
-            openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[1] }}"
-            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[1] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-            openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
-            openshift_node_nameservers:
-              - "{{ DNS_NAMESERVER }}"
-            openshift_node_machine_ip_address: 192.168.95.2
-            openshift_node_install_device: /dev/vda
-            openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
-          - bootMode: legacy
-            openshift_control_node: true
-            openshift_node_bmc:
-              address: "{{ SUSHY_SERVER }}"
-              username: admin
-              password: password123
-            openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_shortname: "{{ CONTROL_PLANE_NAMES[2] }}"
-            openshift_node_fqdn: "{{ CONTROL_PLANE_NAMES[2] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-            openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
-            openshift_node_nameservers:
-              - "{{ DNS_NAMESERVER }}"
-            openshift_node_machine_ip_address: 192.168.95.3
-            openshift_node_install_device: /dev/vda
-            openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
-          - bootMode: legacy
-            openshift_control_node: false
-            openshift_node_bmc:
-              address: "{{ SUSHY_SERVER }}"
-              username: admin
-              password: password123
-            openshift_node_cidr: "{{ NETWORK_CIDR }}"
-            openshift_node_shortname: "{{ WORKER_NAMES[0] }}"
-            openshift_node_fqdn: "{{ WORKER_NAMES[0] }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-            openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
-            openshift_node_nameservers:
-              - "{{ DNS_NAMESERVER }}"
-            openshift_node_machine_ip_address: 192.168.95.4
-            openshift_node_install_device: /dev/vda
-            openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
-    
-    - block:
-      - name: Get Mirror Registry Cert
-        ansible.builtin.include_role:
-          name: vault_read_storage
-        vars:
-          vault_path: "{{ REGISTRY_CERT_VAULT_PATH }}"
-          fact_var_name: "ADDITIONAL_TRUST_BUNDLE"
-          certificate_data_path: "data.data.data.certificate"
-          decode_certificate: true
+        # IP address base for machine network - will be incremented for each node
+        MACHINE_IP_BASE: "192.168.95"
+        MACHINE_IP_START: 1
 
-      - name: Get Mirror Registry Cert
-        ansible.builtin.include_role:
-          name: vault_read_storage
-        vars:
-          vault_path: "credentials/data/OpenShift_Pull"
-          fact_var_name: "PULL_SECRET"
-          certificate_data_path: "data.data.data.pull_secret"
-          decode_certificate: true
-      
-      - name: Get Mirror Registry Cert
-        ansible.builtin.include_role:
-          name: vault_read_storage
-        vars:
-          vault_path: "credentials/data/OCP_SSHKEY"
-          fact_var_name: "SSH_KEY"
-          certificate_data_path: "data.data.data.public_key"
-          decode_certificate: false
-      when: RETRIEVE_FROM_VAULT is defined and  RETRIEVE_FROM_VAULT| bool
+    # Refactoring assisted by Cursor ussing Claude 4 Sonnet
+    - name: Generate control plane node parameters
+      set_fact:
+        control_plane_params: "{{ control_plane_params | default([]) + [node_config] }}"
+      loop: "{{ CONTROL_PLANE_NAMES }}"
+      loop_control:
+        index_var: node_index
+        loop_var: node_name
+      vars:
+        node_config:
+          bootMode: legacy
+          openshift_control_node: true
+          openshift_node_bmc:
+            address: "{{ SUSHY_SERVER }}"
+            username: admin
+            password: password123
+          openshift_node_cidr: "{{ NETWORK_CIDR }}"
+          openshift_node_shortname: "{{ node_name }}"
+          openshift_node_fqdn: "{{ node_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+          openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
+          openshift_node_nameservers:
+            - "{{ DNS_NAMESERVER }}"
+          openshift_node_machine_ip_address: "{{ MACHINE_IP_BASE }}.{{ MACHINE_IP_START + node_index }}"
+          openshift_node_install_device: /dev/vda
+          openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
+
+    # Refactoring assisted by Cursor ussing Claude 4 Sonnet
+    - name: Generate worker node parameters
+      set_fact:
+        worker_params: "{{ worker_params | default([]) + [node_config] }}"
+      loop: "{{ WORKER_NAMES }}"
+      loop_control:
+        index_var: node_index
+        loop_var: node_name
+      vars:
+        node_config:
+          bootMode: legacy
+          openshift_control_node: false
+          openshift_node_bmc:
+            address: "{{ SUSHY_SERVER }}"
+            username: admin
+            password: password123
+          openshift_node_cidr: "{{ NETWORK_CIDR }}"
+          openshift_node_shortname: "{{ node_name }}"
+          openshift_node_fqdn: "{{ node_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+          openshift_node_gateway: "{{ NETWORK_GATEWAY }}"
+          openshift_node_nameservers:
+            - "{{ DNS_NAMESERVER }}"
+          openshift_node_machine_ip_address: "{{ MACHINE_IP_BASE }}.{{ MACHINE_IP_START + NUMBER_OF_MASTER_VMS + node_index }}"
+          openshift_node_install_device: /dev/vda
+          openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
+      when: 
+        - WORKER_NAMES is defined
+        - NUMBER_OF_WORKER_VMS > 0
+
+    - name: Combine control plane and worker parameters
+      set_fact:
+        OPENSHIFT_CLUSTER_PROVISION_PARAMS: "{{ control_plane_params + (worker_params | default([])) }}"
+    
+    # Refactoring assisted by Cursor ussing Claude 4 Sonnet
+    - name: Retrieve secrets from Vault
+      ansible.builtin.include_role:
+        name: vault_read_storage
+      vars:
+        vault_path: "{{ item.path }}"
+        fact_var_name: "{{ item.fact_name }}"
+        certificate_data_path: "{{ item.data_path }}"
+        decode_certificate: "{{ item.decode }}"
+      loop:
+        - path: "{{ REGISTRY_CERT_VAULT_PATH }}"
+          fact_name: "ADDITIONAL_TRUST_BUNDLE"
+          data_path: "data.data.data.certificate"
+          decode: true
+        - path: "credentials/data/OpenShift_Pull"
+          fact_name: "PULL_SECRET"
+          data_path: "data.data.data.pull_secret"
+          decode: true
+        - path: "credentials/data/OCP_SSHKEY"
+          fact_name: "SSH_KEY"
+          data_path: "data.data.data.public_key"
+          decode: false
+      loop_control:
+        label: "{{ item.fact_name }}"
+      when: RETRIEVE_FROM_VAULT is defined and RETRIEVE_FROM_VAULT | bool
 
     - name: Ensure all required variables are defined and not empty
       assert:

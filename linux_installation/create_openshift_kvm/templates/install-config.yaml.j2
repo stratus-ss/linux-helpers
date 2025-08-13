@@ -112,7 +112,7 @@ additionalTrustBundle: |
     {{ ADDITIONAL_TRUST_BUNDLE | indent(4)}}
 {% else %}
 additionalTrustBundle: ''
-{%endif %}
+{% endif %}
  
 pullSecret: '{{ PULL_SECRET | to_json }}'
  
