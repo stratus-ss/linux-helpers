@@ -22,7 +22,7 @@
 
       - name: Ensure Cluster is destroyed
         ansible.builtin.shell: openshift-install delete cluster --dir {{ openshift_install_dir }}
-        when: destory_cluster | default(false) | bool
+        when: destroy_cluster | default(false) | bool
 
       - name: add kvm host to inventory
         add_host:
