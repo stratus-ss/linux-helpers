@@ -303,6 +303,12 @@
         OPENSHIFT_BAREMETAL_INSTALL: "{{ hostvars[groups['kvm'][0]]['OPENSHIFT_BAREMETAL_INSTALL'] }}"
         OPENSHIFT_VERSION: "{{ hostvars[groups['kvm'][0]]['OPENSHIFT_VERSION'] }}"
         INSTALL_USER_BINARY_PATH: "{{ hostvars[groups['kvm'][0]]['INSTALL_USER_BINARY_PATH'] }}"
+        KVM_PACKAGES: "{{ hostvars[groups['kvm'][0]]['KVM_PACKAGES'] }}"
+        OPENSHFIT_DOWNLOAD_URL: "{{ hostvars[groups['kvm'][0]]['OPENSHFIT_DOWNLOAD_URL'] }}"
+        HASHI_VAULT_URL: "{{ hostvars[groups['kvm'][0]]['HASHI_VAULT_URL'] }}"
+        HASHI_VAULT_ROLE_ID: "{{ hostvars[groups['kvm'][0]]['HASHI_VAULT_ROLE_ID'] }}"
+        HASHI_VAULT_SECRET_ID: "{{ hostvars[groups['kvm'][0]]['HASHI_VAULT_SECRET_ID'] }}"
+        HASHI_VAULT_PATH: "{{ hostvars[groups['kvm'][0]]['HASHI_VAULT_PATH'] }}"
 
     - name: Install HVAC requirement to interact with Vault
       ansible.builtin.package:
