@@ -134,7 +134,7 @@
           openshift_node_primary_nic: "{{ NETWORK_INTERFACE }}"
       when: 
         - WORKER_NAMES is defined
-        - NUMBER_OF_WORKER_VMS > 0
+        - NUMBER_OF_WORKER_VMS |int > 0
 
     - name: Combine control plane and worker parameters
       set_fact:
