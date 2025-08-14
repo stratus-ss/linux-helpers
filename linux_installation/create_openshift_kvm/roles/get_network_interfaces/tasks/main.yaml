@@ -24,10 +24,6 @@
     msg: "{{ OPENSHIFT_CLUSTER_PROVISION_PARAMS }}"
   when: DEBUG is defined and DEBUG | bool
 
-# - name: Create dictionary for control plane MAC addresses keyed by vm_name
-#   ansible.builtin.set_fact:
-#     control_plane_macs: "{{ dict(CONTROL_PLANE_NAMES | zip(control_plane_info.results | map(attribute='network_interfaces'))) }}"
-
 - name: Create dictionary for control plane MAC addresses keyed by FQDN
   ansible.builtin.set_fact:
     control_plane_macs: >-
@@ -39,17 +35,16 @@
         )
       }}
 
+- name: Debug control plane macs
+  debug:
+    msg: "{{ control_plane_macs }}"
+  when: 
+    - control_plane_macs is defined
+    - DEBUG is defined and DEBUG | bool
 
-# - name: Create dictionary for worker MAC addresses keyed by vm_name
-#   ansible.builtin.set_fact:
-#     worker_macs: "{{ dict(WORKER_NAMES | zip(worker_info.results | map(attribute='network_interfaces'))) }}"
-#   when: 
-#     - WORKER_NAMES is defined
-#     - NUMBER_OF_WORKER_VMS !=0
-
-- name: Create dictionary for worker MAC addresses keyed by vm_name
+- name: Create dictionary for worker MAC addresses keyed by FQDN
   ansible.builtin.set_fact:
-    control_plane_macs: >-
+    worker_macs: >-
       {{
         dict(
           WORKER_NAMES
@@ -61,12 +56,14 @@
     - WORKER_NAMES is defined
     - NUMBER_OF_WORKER_VMS !=0
 
-- name: debug macs
+- name: debug worker macs
   debug:
-    msg: "{{ worker_macs  }}"
+    msg: "{{ worker_macs }}"
   when: 
     - WORKER_NAMES is defined
-    - NUMBER_OF_WORKER_VMS !=0  
+    - NUMBER_OF_WORKER_VMS !=0
+    - worker_macs is defined
+    - DEBUG is defined and DEBUG | bool  
 
 - name: Build updated list
   ansible.builtin.set_fact:
@@ -84,7 +81,7 @@
               if item.openshift_control_node
               else (
                 worker_macs[item.openshift_node_fqdn][worker_macs[item.openshift_node_fqdn].keys()|list|first].mac
-                if (WORKER_NAMES is defined and NUMBER_OF_WORKER_VMS != 0)
+                if (WORKER_NAMES is defined and NUMBER_OF_WORKER_VMS != 0 and worker_macs is defined)
                 else omit
               )
             )
@@ -99,3 +96,12 @@
 - name: Update the original data structure
   ansible.builtin.set_fact:
     OPENSHIFT_CLUSTER_PROVISION_PARAMS: "{{ updated_list }}"
+
+# added by Cursor using Claude 4 Sonnet
+- name: Display MAC address extraction summary
+  debug:
+    msg: >
+      Successfully extracted MAC addresses for {{ updated_list | length }} nodes:
+      Control Plane: {{ control_plane_macs.keys() | list | length if control_plane_macs is defined else 0 }} nodes,
+      Workers: {{ worker_macs.keys() | list | length if worker_macs is defined else 0 }} nodes
+  when: DEBUG is defined and DEBUG | bool
