@@ -14,7 +14,6 @@
       <feature enabled="no" name="secure-boot"/>
     </firmware>
     <loader readonly="yes" secure="no" type="pflash" format="raw">/usr/share/edk2/ovmf/OVMF_CODE.fd</loader>
-    <nvram template="/usr/share/edk2/ovmf/OVMF_VARS.fd" templateFormat="raw" format="raw">/var/lib/libvirt/qemu/nvram/ocp-worker1.one.example.com_VARS.fd</nvram>
     <bootmenu enable="yes"/>
   </os>
   <cpu mode="host-passthrough" check="none" migratable="on"/>
