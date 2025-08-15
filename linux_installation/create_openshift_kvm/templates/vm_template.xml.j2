@@ -2,6 +2,11 @@
   <name>{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}</name>
   <memory unit='MiB'>{{ VM_RAM_MB }}</memory>
   <vcpu placement='static'>{{ VM_vCPUS }}</vcpu>
+  <features>
+    <acpi/>
+    <apic/>
+    <smm state="on"/>
+  </features>
   <os firmware="efi">
     <type arch="x86_64" machine="pc-q35-rhel9.6.0">hvm</type>
     <firmware>
