@@ -42,7 +42,7 @@ platform:
             username: {{ host.openshift_node_bmc.username }}
             password: {{ host.openshift_node_bmc.password }}
         bootMACAddress: {{ host.openshift_node_mac_address }}
-        bootMode: {{ host.bootMode }}
+        #bootMode: {{ host.bootMode }}
         rootDeviceHints:
           deviceName: {{ host.openshift_node_install_device }}
         networkConfig:
