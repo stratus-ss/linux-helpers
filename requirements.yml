@@ -4,4 +4,4 @@ collections:
   - name: community.libvirt
   - name: community.crypto
   - name: ansible.utils
-  - name: git+https://github.com/stratus-ss/pfsensible.git,preserve_unbound_hosts
+  - name: git+https://github.com/stratus-ss/pfsensible.git,preserve_host_testing
