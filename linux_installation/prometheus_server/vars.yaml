@@ -20,6 +20,7 @@ prometheus_image: prom/prometheus:latest
 prometheus_restart_policy: unless-stopped
 
 # Prometheus container user (nobody:nobody)
+# This user ID is also used to set ownership of the data directory
 prometheus_user_id: "65534:65534"
 
 # Whether to configure firewall rules

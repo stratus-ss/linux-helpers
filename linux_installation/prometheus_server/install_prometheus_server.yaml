@@ -14,6 +14,14 @@
       loop:
         - "{{ prometheus_dir }}"
         - "{{ prometheus_data_dir }}"
+
+    - name: Set ownership of Prometheus data directory for container access
+      file:
+        path: "{{ prometheus_data_dir }}"
+        owner: '65534'
+        group: '65534'
+        mode: '0755'
+        recurse: yes
     
     - name: Create initial Prometheus configuration from template
       template:
