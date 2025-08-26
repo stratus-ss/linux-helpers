@@ -105,6 +105,6 @@
 
     - name: Verify container is running
       ansible.builtin.wait_for:
-        port: 9090
+        port: "{{ prometheus_host_port }}"
         timeout: 30
 
