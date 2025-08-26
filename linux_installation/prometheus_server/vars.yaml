@@ -1,0 +1,32 @@
+---
+# Modify the prometheus.yaml.j2 template file directly for configuration changes
+
+# The host or group where Prometheus will be deployed
+prometheus_host: prometheus_servers
+
+# Base directory for prometheus configuration and compose files
+prometheus_dir: /containers/prometheus
+
+# Directory for prometheus data storage (persistent data)
+prometheus_data_dir: /var/lib/prometheus
+
+# Port to expose prometheus web interface on the host
+prometheus_host_port: 9191
+
+# Prometheus container image
+prometheus_image: prom/prometheus:latest
+
+# Container restart policy
+prometheus_restart_policy: unless-stopped
+
+# Prometheus container user (nobody:nobody)
+prometheus_user_id: "65534:65534"
+
+# Whether to configure firewall rules
+configure_firewall: true
+
+# Firewall port to open (prometheus internal port)
+prometheus_firewall_port: 9090
+
+# Whether to backup existing configuration before updating
+backup_existing_config: true
