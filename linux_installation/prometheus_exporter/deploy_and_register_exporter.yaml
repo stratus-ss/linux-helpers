@@ -1,0 +1,74 @@
+---
+# Deploy Node Exporter and Register with Prometheus via API
+# This playbook deploys node exporters and then uses the API to update Prometheus config
+
+- name: Pre-check and gather facts
+  hosts: "{{ node_exporter_host }}"
+  gather_facts: no
+  tasks:
+    - name: Gather facts
+      setup:
+      register: fact_result
+      ignore_unreachable: true
+
+    - name: Add reachable hosts to group
+      group_by:
+        key: "reachable_hosts"
+      when: fact_result.unreachable is undefined
+
+    - meta: clear_host_errors
+
+# Use the existing node_exporter deployment playbook
+- import_playbook: deploy_node_exporter.yaml
+  vars:
+    # Use reachable_hosts instead of all
+    target_hosts: reachable_hosts
+
+# Register successfully deployed exporters with Prometheus
+- name: Register Node Exporters with Prometheus
+  hosts: localhost
+  gather_facts: no
+  vars:
+    # Get list of hosts that had successful node exporter deployment
+    successfully_deployed: "{{ groups.get('reachable_hosts', []) }}"
+    auto_register_with_prometheus: "{{ auto_register_with_prometheus | default(true) }}"
+    
+  tasks:
+    - name: Display deployment summary
+      debug:
+        msg: |
+          Node Exporter Deployment Summary:
+          ===============================
+          Total hosts processed: {{ groups.get('all', []) | length }}
+          Reachable hosts: {{ groups.get('reachable_hosts', []) | length }}
+          Successfully deployed to: {{ successfully_deployed | length }} hosts
+          
+          Deployed hosts:
+          {% for host in successfully_deployed %}
+          - {{ host }}
+          {% endfor %}
+          
+          Auto-register with Prometheus: {{ auto_register_with_prometheus }}
+
+    - name: Register with Prometheus via API
+      include_tasks: update_prometheus_targets.yaml
+      vars:
+        hosts_to_add: "{{ successfully_deployed }}"
+        prometheus_host: "{{ prometheus_host | default('prometheus_servers') }}"
+      when: 
+        - auto_register_with_prometheus | bool
+        - successfully_deployed | length > 0
+
+    - name: Final deployment status
+      debug:
+        msg: |
+          =======================================================
+          DEPLOYMENT COMPLETE
+          =======================================================
+          
+          ✓ Node exporters deployed: {{ successfully_deployed | length }} hosts
+          ✓ Prometheus registration: {{ 'AUTOMATIC' if auto_register_with_prometheus else 'MANUAL' }}
+          
+          {% if auto_register_with_prometheus %}
+          Check Prometheus targets: http://containers.example.com:9191/targets
+          {% endif %}

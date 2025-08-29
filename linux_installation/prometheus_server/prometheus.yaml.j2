@@ -10,7 +10,12 @@ scrape_configs:
 -   job_name: nodes
     static_configs:
     -   targets:
+        {% if prometheus_node_targets is defined %}
+        {% for target in prometheus_node_targets %}
+        - {{ target }}
+        {% endfor %}
+        {% else %}
         {% for host in groups['all'] %}
         - {{ host }}:9100
         {% endfor %}
-        - home-assistant.example.com:9100
+        {% endif %}
