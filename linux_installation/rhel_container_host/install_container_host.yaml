@@ -1,6 +1,6 @@
 ---
 - name: Configure Container Hosts
-  hosts: virtualization
+  hosts: "{{ container_host}}"
   gather_facts: yes
   become: true
   # uncomment below for local playbook
@@ -28,15 +28,18 @@
         name: nvidia_drivers
       when: nvidia_install| default(false) |bool
     
-    # Use the improved roles from rhel_apache_reverse_proxy
     - name: Retrieve Certs from Vault
       include_role:
         name: vault_read_certificates
-        tasks_from: "{{ playbook_dir }}/../rhel_apache_reverse_proxy/roles/vault_read_certificates"
       when: apache_install| default(false) |bool
 
     - name: Install Apache Reverse Proxy
       include_role:
         name: apache_reverse_proxy
-        tasks_from: "{{ playbook_dir }}/../rhel_apache_reverse_proxy/roles/apache_reverse_proxy"
       when: apache_install| default(false) |bool
+
+    - name: Reboot the system to apply changes
+      reboot:
+        msg: "Rebooting to apply NVIDIA driver installation."
+        pre_reboot_delay: 5
+      when: nvidia_install | default(false) |bool
