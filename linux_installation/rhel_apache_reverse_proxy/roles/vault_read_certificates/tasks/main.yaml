@@ -3,13 +3,12 @@
     - name: Read existing certificate from HashiCorp Vault
       community.hashi_vault.vault_read:
         auth_method: approle
-        url: "{{ ansible_hashi_vault_url }}"
-        role_id: "{{ ansible_hashi_vault_role_id }}"
-        secret_id: "{{ ansible_hashi_vault_secret_id }}"
+        url: "{{ hashi_vault_url }}"
+        role_id: "{{ hashi_vault_role_id }}"
+        secret_id: "{{ hashi_vault_secret_id }}"
         path: "{{ vault_path }}"
       register: vault_cert_read
       ignore_errors: true
-      # delegate to localhost when running in an AWX EE that has the hvac python library
       delegate_to: localhost
 
     - name: Create Cert Directory
