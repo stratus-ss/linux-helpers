@@ -1,0 +1,148 @@
+{
+  "prometheus_exporter_variables": {
+    "required_variables": [
+      {
+        "name": "node_exporter_version",
+        "description": "Version of node_exporter to deploy (e.g., '1.8.1')",
+        "type": "string",
+        "required": true,
+        "example": "1.8.1"
+      },
+      {
+        "name": "node_exporter_port",
+        "description": "Port for node_exporter to listen on",
+        "type": "string",
+        "required": true,
+        "example": "9100"
+      }
+    ],
+    
+    "optional_variables": [
+      {
+        "name": "node_exporter_host",
+        "description": "Target hosts/group for node_exporter deployment (for deploy_and_register_exporter.yaml)",
+        "type": "string",
+        "default": "all",
+        "example": "webservers"
+      },
+      {
+        "name": "auto_register_with_prometheus",
+        "description": "Automatically register deployed exporters with Prometheus",
+        "type": "boolean",
+        "default": true,
+        "example": true
+      },
+      {
+        "name": "prometheus_host",
+        "description": "Prometheus server host/group for API operations",
+        "type": "string", 
+        "default": "prometheus_servers",
+        "example": "prometheus_servers"
+      },
+      {
+        "name": "prometheus_host_port",
+        "description": "Port where Prometheus web interface is exposed on host",
+        "type": "string",
+        "default": "9191",
+        "example": "9191"
+      },
+      {
+        "name": "hosts_to_add",
+        "description": "List of hosts to add to Prometheus monitoring (for update_prometheus_targets.yaml)",
+        "type": "array",
+        "default": [],
+        "example": ["web1.example.com", "web2.example.com"]
+      },
+      {
+        "name": "hosts_to_remove",
+        "description": "List of hosts to remove from Prometheus monitoring (for update_prometheus_targets.yaml)",
+        "type": "array",
+        "default": [],
+        "example": ["old-server.example.com"]
+      },
+      {
+        "name": "backup_prometheus_config",
+        "description": "Create backup of Prometheus config before updating",
+        "type": "boolean",
+        "default": true,
+        "example": true
+      },
+      {
+        "name": "validate_prometheus_config",
+        "description": "Validate Prometheus configuration with promtool before applying",
+        "type": "boolean",
+        "default": true,
+        "example": true
+      }
+    ],
+    
+    "playbook_specific": {
+      "deploy_node_exporter.yaml": {
+        "required": ["node_exporter_version", "node_exporter_port"],
+        "optional": []
+      },
+      "deploy_and_register_exporter.yaml": {
+        "required": ["node_exporter_version", "node_exporter_port"],
+        "optional": ["node_exporter_host", "auto_register_with_prometheus", "prometheus_host", "prometheus_host_port"]
+      },
+      "update_prometheus_targets.yaml": {
+        "required": [],
+        "optional": ["prometheus_host", "node_exporter_port", "hosts_to_add", "hosts_to_remove", "prometheus_host_port", "backup_prometheus_config", "validate_prometheus_config"]
+      }
+    },
+
+    "semaphore_templates": [
+      {
+        "template_name": "Deploy Node Exporters (Basic)",
+        "playbook": "prometheus_exporter/deploy_node_exporter.yaml",
+        "required_vars": {
+          "node_exporter_version": "1.8.1",
+          "node_exporter_port": "9100"
+        }
+      },
+      {
+        "template_name": "Deploy Node Exporters with Registration",
+        "playbook": "prometheus_exporter/deploy_and_register_exporter.yaml",
+        "description": "Deploys node exporters and calls update_prometheus_targets.yaml to register them via API", 
+        "required_vars": {
+          "node_exporter_version": "1.8.1",
+          "node_exporter_port": "9100"
+        },
+        "optional_vars": {
+          "auto_register_with_prometheus": true,
+          "prometheus_host": "prometheus_servers",
+          "prometheus_host_port": "9191"
+        }
+      },
+      {
+        "template_name": "Update Prometheus Targets",
+        "playbook": "prometheus_exporter/update_prometheus_targets.yaml",
+        "optional_vars": {
+          "hosts_to_add": [],
+          "hosts_to_remove": [],
+          "node_exporter_port": "9100",
+          "prometheus_host": "prometheus_servers",
+          "prometheus_host_port": "9191",
+          "backup_prometheus_config": true,
+          "validate_prometheus_config": true
+        }
+      }
+    ],
+
+    "common_examples": {
+      "deploy_to_webservers": {
+        "node_exporter_version": "1.8.1",
+        "node_exporter_port": "9100", 
+        "node_exporter_host": "webservers",
+        "auto_register_with_prometheus": true
+      },
+      "add_specific_hosts": {
+        "hosts_to_add": ["web3.example.com", "db1.example.com"],
+        "node_exporter_port": "9100"
+      },
+      "remove_decommissioned": {
+        "hosts_to_remove": ["old-web1.example.com", "old-db1.example.com"]
+      }
+    }
+  }
+}

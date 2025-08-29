@@ -1,0 +1,12 @@
+{
+  "node_exporter_version": "1.8.1",
+  "node_exporter_port": "9100",
+  "node_exporter_host": "all",
+  "auto_register_with_prometheus": true,
+  "prometheus_host": "prometheus_servers", 
+  "prometheus_host_port": "9191",
+  "hosts_to_add": [],
+  "hosts_to_remove": [],
+  "backup_prometheus_config": true,
+  "validate_prometheus_config": true
+}
