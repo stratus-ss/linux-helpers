@@ -1,30 +1,51 @@
-Listen 443 https
+Listen 443
 
 {% for vhost in vhosts %}
+{% if vhost.redirect is defined and vhost.redirect %}
+<VirtualHost {{ vhost.name }}:80>
+    ServerName {{ vhost.name }}
+    Redirect permanent / https://{{ vhost.name }}/
+</VirtualHost>
+{% endif %}
+
 <VirtualHost {{ vhost.name }}:443>
     ServerName {{ vhost.name }}
 
     SSLEngine on
-    SSLCertificateFile {{ vhost.cert_file_location }}
-    SSLCertificateKeyFile {{ vhost.cert_key_file_location }} 
+    SSLCertificateFile {{ vhost.cert_file_location | default(cert_file_location, true) }}
+    SSLCertificateKeyFile {{ vhost.cert_key_file_location | default(cert_key_file_location, true) }}
 
     ProxyPreserveHost On
-    ProxyRequests Off
 
-    RewriteEngine On
-    {% raw %}
-    RewriteCond %{HTTP:Upgrade} websocket [NC]
-    RewriteCond %{HTTP:Connection} upgrade [NC]
-    {% endraw %}
-    RewriteRule /(.*) ws://localhost:{{ vhost.app_port }}/$1 [P,L]
+    {% if vhost.directory_listing is defined %}
+    Alias "{{ vhost.directory_listing.url_path }}" "{{ vhost.directory_listing.file_path }}"
+    <Directory "{{ vhost.directory_listing.file_path }}">
+        Options +Indexes +FollowSymLinks
+        IndexOptions FancyIndexing HTMLTable NameWidth=*
+        AllowOverride None
+        Require all granted
+    </Directory>
 
-    ProxyPass /api/socket.io ws://localhost:{{ vhost.app_port }}/api/socket.io
-    ProxyPassReverse /api/socket.io ws://localhost:{{ vhost.app_port }}/api/socket.io
+    ProxyPass {{ vhost.directory_listing.url_path }} !
+    {% endif %}
 
     ProxyPass / http://localhost:{{ vhost.app_port }}/
     ProxyPassReverse / http://localhost:{{ vhost.app_port }}/
 
     RequestHeader set "X-Forwarded-Proto" "https"
+    {% if vhost.rewrite_engine is defined and vhost.rewrite_engine %}
+    RewriteEngine On
+    RewriteCond %{HTTP:Upgrade} =websocket [NC]
+    RewriteRule /(.*)           ws://localhost:{{ vhost.app_port }}/$1 [P,L]
+    RewriteCond %{HTTP:Upgrade} !=websocket [NC]
+    RewriteRule /(.*)           http://localhost:{{ vhost.app_port }}/$1 [P,L]
+    {% endif %}
 
+    {% if vhost.allow_location is defined and vhost.allow_location %}
+    <Location />
+        Order deny,allow
+        Allow from all
+    </Location>
+    {% endif %}
 </VirtualHost>
 {% endfor %}
