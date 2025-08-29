@@ -1,6 +1,6 @@
 ---
 - name: Configure Virtualization Host
-  hosts: virtualization
+  hosts: "{{ virtualization_host }}"
   gather_facts: yes
   become: true
 
@@ -8,6 +8,13 @@
 #  vars:
 #    cockpit_packages:
 #      - cockpit
+#      - cockpit-bridge
+#      - cockpit-system
+#      - cockpit-networkmanager
+#      - cockpit-packagekit
+#      - cockpit-selinux
+#      - cockpit-storaged
+#      - cockpit-ws
 #    extra_packages:
 #      - inxi
 #      - nano
