@@ -70,6 +70,8 @@
 - import_playbook: update_prometheus_targets.yaml
   vars:
     hosts_to_add: "{{ hostvars['localhost']['successfully_deployed'] }}"
+    prometheus_host: "{{ prometheus_host }}"
+    prometheus_host_port: "{{ prometheus_host_port | default(9191) }}"
   when: 
     - auto_register_with_prometheus | default(true) | bool
     - hostvars['localhost']['successfully_deployed'] is defined
