@@ -1,0 +1,68 @@
+---
+# OS Updates Playbook Configuration Variables
+# ==========================================
+# These variables control the behavior of the OS updates playbook
+
+# Target Configuration
+# -------------------
+target_hosts: "all"  # Ansible inventory group or specific hosts
+
+# Role Execution Control
+# ----------------------
+skip_system_detection: false      # Skip VM/OS detection (not recommended - other roles depend on this)
+skip_os_updates: false            # Skip operating system updates
+skip_docker_updates: false        # Skip Docker Compose updates  
+skip_post_actions: false          # Skip post-update actions (shutdown/reboot)
+
+# Update Behavior (Legacy - maintained for backward compatibility)
+# ---------------------------------------------------------------
+perform_os_updates: true          # Enable/disable OS package updates
+perform_docker_updates: true      # Enable/disable Docker Compose updates
+backup_before_update: false       # Create backups before updating
+update_timeout: 3600              # Timeout for update operations (seconds)
+
+# Post-Update Actions
+# ------------------
+auto_shutdown_vms: true           # Automatically shutdown VMs after successful updates (VMs NEVER reboot)
+reboot_after_updates: false      # DEPRECATED: Physical machines NEVER auto-reboot (manual only)
+reboot_required_check: true      # Check if reboot is required after updates (informational for physical machines)
+
+# Arch Linux Specific
+# -------------------
+use_yay_for_aur: true            # Use yay for AUR packages on Arch Linux
+yay_update_args: "--noconfirm --noprogressbar"  # Additional yay arguments
+
+# Docker Compose Settings
+# -----------------------
+compose_backup_enabled: false    # Backup docker-compose files before updating
+compose_update_timeout: 1800     # Timeout for Docker Compose operations (seconds)
+compose_verify_after_update: true # Verify services are running after update
+
+# Logging and Notifications
+# -------------------------
+log_file: "/var/log/ansible-updates.log"
+detailed_logging: true
+notify_on_completion: false      # Future: could be used for email/webhook notifications
+
+# Safety and Recovery
+# ------------------
+max_retry_attempts: 3            # Maximum retries for failed operations
+rollback_on_failure: false      # Future: rollback capability
+dry_run_mode: false              # Preview what would be updated without making changes
+
+# Advanced Options  
+# ---------------
+custom_update_commands:          # Custom commands to run per OS family
+  archlinux: []                  # e.g. ["custom-update-script.sh"]
+  redhat: []
+  debian: []
+  suse: []
+
+exclude_packages: []             # Packages to exclude from updates
+include_only_packages: []        # If specified, only update these packages
+
+# VM Detection Override
+# --------------------
+# Normally auto-detected, but can be overridden for testing
+force_vm_detection: null         # Set to true/false to override detection
+force_virtualization_type: null  # Override detected virtualization type

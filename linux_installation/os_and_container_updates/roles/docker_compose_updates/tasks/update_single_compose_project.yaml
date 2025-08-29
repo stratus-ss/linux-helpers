@@ -1,0 +1,145 @@
+---
+# This task file handles updating a single Docker Compose project
+# project_path variable is passed from the main task
+
+- name: Check if docker-compose.yml exists in project directory
+  stat:
+    path: "{{ project_path }}/docker-compose.yml"
+  register: compose_yml_check
+
+- name: Check for alternate compose file names
+  stat:
+    path: "{{ project_path }}/{{ item }}"
+  register: compose_file_checks
+  loop:
+    - "docker-compose.yaml"
+    - "compose.yml"
+    - "compose.yaml"
+  when: not compose_yml_check.stat.exists
+
+- name: Determine compose file to use
+  set_fact:
+    compose_file: >-
+      {% if compose_yml_check.stat.exists %}
+      docker-compose.yml
+      {% else %}
+      {% for check in compose_file_checks.results | default([]) %}
+      {% if check.stat.exists %}
+      {{ check.item }}
+      {% break %}
+      {% endif %}
+      {% endfor %}
+      {% endif %}
+
+- name: Update Docker Compose project
+  block:
+    - name: Display project update start
+      debug:
+        msg: |
+          Updating Docker Compose project:
+          Path: {{ project_path }}
+          Compose file: {{ compose_file | default('NOT FOUND') }}
+
+    - name: Backup current docker-compose file (optional)
+      copy:
+        src: "{{ project_path }}/{{ compose_file }}"
+        dest: "{{ project_path }}/{{ compose_file }}.backup.{{ ansible_date_time.epoch }}"
+        remote_src: yes
+      when: 
+        - backup_before_update | default(false) | bool
+        - compose_file is defined
+
+    - name: Stop Docker Compose services
+      command: docker compose down
+      args:
+        chdir: "{{ project_path }}"
+      register: compose_down_result
+      when: compose_file is defined
+
+    - name: Pull latest Docker images
+      command: docker compose pull
+      args:
+        chdir: "{{ project_path }}"
+      register: compose_pull_result
+      when: 
+        - compose_file is defined
+        - compose_down_result.rc == 0
+
+    - name: Start Docker Compose services
+      command: docker compose up -d
+      args:
+        chdir: "{{ project_path }}"
+      register: compose_up_result
+      when: 
+        - compose_file is defined
+        - compose_pull_result.rc == 0
+
+    - name: Verify services are running
+      shell: docker compose ps --format "table {{.Name}}\t{{.Status}}" | grep -E "(Up|running)"
+      args:
+        chdir: "{{ project_path }}"
+      register: compose_status_check
+      failed_when: false
+      when: compose_up_result.rc == 0
+
+    - name: Add to successful updates list
+      set_fact:
+        compose_projects_updated: "{{ compose_projects_updated + [project_path] }}"
+      when: 
+        - compose_up_result is defined
+        - compose_up_result.rc == 0
+
+    - name: Display project update success
+      debug:
+        msg: |
+          ✅ Successfully updated Docker Compose project: {{ project_path }}
+          Services status:
+          {{ compose_status_check.stdout | default('Status check failed') }}
+      when: 
+        - compose_up_result is defined
+        - compose_up_result.rc == 0
+
+  rescue:
+    - name: Handle project update failure
+      set_fact:
+        compose_update_errors: >-
+          {{ 
+            compose_update_errors + [
+              project_path + ': ' + (ansible_failed_result.msg | default('Unknown error during compose update'))
+            ]
+          }}
+
+    - name: Attempt to restart services after failure
+      command: docker compose up -d
+      args:
+        chdir: "{{ project_path }}"
+      failed_when: false
+      when: compose_file is defined
+
+    - name: Log project update failure
+      debug:
+        msg: |
+          ❌ Failed to update Docker Compose project: {{ project_path }}
+          Error: {{ ansible_failed_result.msg | default('Unknown error') }}
+          
+          Attempted recovery: docker compose up -d
+
+  when: compose_file is defined
+
+- name: Handle missing compose file
+  block:
+    - name: Add to error list for missing compose file
+      set_fact:
+        compose_update_errors: >-
+          {{ 
+            compose_update_errors + [
+              project_path + ': No docker-compose file found'
+            ]
+          }}
+
+    - name: Log missing compose file
+      debug:
+        msg: |
+          ⚠️  No Docker Compose file found in: {{ project_path }}
+          Checked for: docker-compose.yml, docker-compose.yaml, compose.yml, compose.yaml
+  when: compose_file is not defined
