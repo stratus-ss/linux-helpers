@@ -1,0 +1,252 @@
+---
+# API-based Prometheus Target Management
+# This playbook reads the current Prometheus configuration via API and intelligently updates targets
+
+- name: Update Prometheus Targets via API
+  hosts: "{{ prometheus_host | default('prometheus_servers') }}"
+  become: true
+  vars_files:
+    - ../prometheus_server/vars.yaml
+  vars:
+    # Node exporter settings
+    node_exporter_port: "{{ node_exporter_port | default('9100') }}"
+    
+    # Hosts to add to monitoring (from current deployment or manual specification)
+    hosts_to_add: "{{ hosts_to_add | default([]) }}"
+    hosts_to_remove: "{{ hosts_to_remove | default([]) }}"
+    
+    # Prometheus API settings - construct URL based on current host
+    prometheus_api_url: "http://{{ inventory_hostname }}:{{ prometheus_host_port | default(9191) }}"
+    prometheus_api_url_localhost: "http://localhost:{{ prometheus_host_port | default(9191) }}"
+    
+    # Configuration options
+    backup_config: "{{ backup_prometheus_config | default(true) }}"
+    validate_config: "{{ validate_prometheus_config | default(true) }}"
+    
+  tasks:
+    - name: Check if Prometheus is running 
+      uri:
+        url: "{{ prometheus_api_url }}/-/healthy"
+        method: GET
+        timeout: 10
+        status_code: 200
+      register: prometheus_health_external
+      ignore_errors: yes
+
+    - name: Fail if Prometheus is not running
+      fail:
+        msg: |
+          Prometheus is not accessible:
+          - External: {{ prometheus_api_url }} - {{ prometheus_health_external.msg | default('Unknown error') }}
+          
+          Please ensure Prometheus is running and accessible.
+      when: 
+        - prometheus_health_external is failed
+
+
+    - name: Get current Prometheus configuration via API
+      uri:
+        url: "{{ working_api_url }}/api/v1/status/config"
+        method: GET
+        timeout: 10
+      register: current_config_response
+
+    - name: Extract current node exporter targets from API response
+      set_fact:
+        # Parse YAML and extract targets from 'nodes' job
+        current_config: "{{ current_config_response.json.data.yaml | from_yaml }}"
+        
+    - name: Find and extract current targets
+      set_fact:
+        current_targets: >-
+          {{
+            current_config.scrape_configs |
+            selectattr('job_name', 'match', '.*(node|nodes).*') |
+            map(attribute='static_configs') |
+            flatten |
+            map(attribute='targets') |
+            flatten |
+            list |
+            default([])
+          }}
+
+    - name: Display current configuration summary
+      debug:
+        msg: |
+          Current Prometheus Configuration Summary:
+          ========================================
+          Total scrape jobs: {{ current_config.scrape_configs | length }}
+          Node exporter job found: {{ 'YES' if current_targets | length > 0 else 'NO' }}
+          Current node exporter targets: {{ current_targets | length }}
+          
+          {% if current_targets | length > 0 %}
+          Current targets (first 10):
+          {% for target in current_targets[:10] %}
+          - {{ target }}
+          {% endfor %}
+          {% if current_targets | length > 10 %}
+          ... and {{ current_targets | length - 10 }} more
+          {% endif %}
+          {% endif %}
+
+
+
+    - name: Build new targets list
+      set_fact:
+        new_targets: >-
+          {{
+            (current_targets + 
+             (hosts_to_add | map('regex_replace', '^(.*)$', '\1:' + (node_exporter_port | string)) | list)) |
+            difference(hosts_to_remove | map('regex_replace', '^(.*)$', '\1:' + (node_exporter_port | string)) | list) |
+            unique |
+            sort
+          }}
+
+    - name: Check if targets have changed
+      set_fact:
+        targets_changed: "{{ current_targets | sort != new_targets | sort }}"
+
+    - name: Skip update if no changes needed
+      debug:
+        msg: "Skipping configuration update - no target changes detected"
+      when: not targets_changed
+
+    - name: Update Prometheus configuration using template
+      block:
+        - name: Backup existing configuration
+          copy:
+            src: "{{ prometheus_dir }}/prometheus.yaml"
+            dest: "{{ prometheus_dir }}/prometheus.yaml.backup.{{ ansible_date_time.epoch }}"
+            remote_src: yes
+          when: backup_config | bool
+
+        - name: Generate updated configuration from template
+          template:
+            src: ../prometheus_server/prometheus.yaml.j2
+            dest: "{{ prometheus_dir }}/prometheus.yaml"
+            mode: '0644'
+            backup: yes
+          vars:
+            # Pass the merged targets to the template
+            prometheus_node_targets: "{{ new_targets }}"
+
+        - name: Validate new configuration
+          shell: |
+            cd {{ prometheus_dir }}
+            docker run --rm \
+              --name prometheus-config-validator-{{ ansible_date_time.epoch }} \
+              -v $(pwd):/workspace \
+              prom/prometheus:latest \
+              promtool check config /workspace/prometheus.yaml
+          register: config_validation
+          when: validate_config | bool
+
+        - name: Handle validation failure
+          block:
+            - name: Restore backup
+              copy:
+                src: "{{ prometheus_dir }}/prometheus.yaml.backup.{{ ansible_date_time.epoch }}"
+                dest: "{{ prometheus_dir }}/prometheus.yaml"
+                remote_src: yes
+            
+            - name: Fail with validation error
+              fail:
+                msg: |
+                  Configuration validation failed!
+                  Error: {{ config_validation.stderr }}
+                  Backup has been restored.
+          when: 
+            - validate_config | bool
+            - config_validation.rc != 0
+
+        - name: Reload Prometheus configuration
+          uri:
+            url: "{{ working_api_url }}/-/reload"
+            method: POST
+            timeout: 10
+          register: reload_result
+          failed_when: false  # Handle failures in rescue block
+
+        - name: Wait for Prometheus to be ready after reload
+          uri:
+            url: "{{ working_api_url }}/-/ready"
+            method: GET
+            timeout: 30
+          retries: 6
+          delay: 5
+
+        - name: Verify targets were updated
+          uri:
+            url: "{{ working_api_url }}/api/v1/targets"
+            method: GET
+          register: updated_targets_response
+            
+      rescue:
+        - name: Handle configuration reload failure
+          block:
+            - name: Check if backup exists
+              stat:
+                path: "{{ prometheus_dir }}/prometheus.yaml.backup.{{ ansible_date_time.epoch }}"
+              register: backup_check
+              
+            - name: Restore backup configuration
+              copy:
+                src: "{{ prometheus_dir }}/prometheus.yaml.backup.{{ ansible_date_time.epoch }}"
+                dest: "{{ prometheus_dir }}/prometheus.yaml"
+                remote_src: yes
+              when: 
+                - backup_config | bool
+                - backup_check.stat.exists
+                
+            - name: Attempt reload after restore
+              uri:
+                url: "{{ working_api_url }}/-/reload"
+                method: POST
+                timeout: 10
+              ignore_errors: yes
+              when:
+                - backup_config | bool 
+                - backup_check.stat.exists
+                
+            - name: Fail with detailed error message
+              fail:
+                msg: |
+                  ❌ Prometheus configuration update FAILED!
+                  
+                  {% if reload_result is defined and reload_result.status is defined %}
+                  Reload Error: HTTP {{ reload_result.status }} - {{ reload_result.msg | default('Unknown error') }}
+                  {% else %}
+                  Reload Error: {{ ansible_failed_result.msg | default('Unknown reload error') }}
+                  {% endif %}
+                  
+                  {% if backup_config | bool and backup_check.stat.exists %}
+                  ✅ Backup configuration has been restored.
+                  {% else %}
+                  ⚠️  No backup was available - manual intervention may be required.
+                  {% endif %}
+                  
+                  For Docker Compose deployments, consider:
+                  1. Checking container logs: docker-compose logs prometheus
+                  2. Validating compose service: docker-compose config
+                  3. Restarting service: docker-compose restart prometheus
+                  
+                  Current API: {{ working_api_url }}
+
+      when: targets_changed
+
+    - name: Display final summary
+      debug:
+        msg: |
+          =======================================================
+          PROMETHEUS TARGET UPDATE COMPLETE
+          =======================================================
+          
+          ✓ Configuration read from API: {{ working_api_url }}/api/v1/status/config
+          ✓ Target changes: {{ 'YES' if targets_changed else 'NO CHANGES NEEDED' }}
+          {% if targets_changed %}
+          ✓ Configuration updated and reloaded
+          ✓ Total active targets: {{ new_targets | length }}
+          {% endif %}
+          
+          Prometheus UI: {{ working_api_url }}
+          Targets page: {{ working_api_url }}/targets
