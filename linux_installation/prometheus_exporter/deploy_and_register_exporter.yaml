@@ -1,54 +1,35 @@
 ---
-# Deploy Node Exporter and Register with Prometheus via API
-# This playbook deploys node exporters and then uses the API to update Prometheus config
-
-- name: Pre-check and gather facts
+- name: Deploy Node Exporter and Register with Prometheus
   hosts: "{{ node_exporter_host }}"
-  gather_facts: no
+  become: true
+  vars_files:
+    - ../prometheus_server/vars.yaml
   tasks:
-    - name: Gather facts
-      setup:
-      register: fact_result
-      ignore_unreachable: true
+    # Install Node Exporter (conditionally)
+    - name: Include node_exporter role
+      include_role:
+        name: node_exporter
+      when: not skip_node_exporter_install | default(false) | bool
 
-    - name: Add reachable hosts to group
-      group_by:
-        key: "reachable_hosts"
-      when: fact_result.unreachable is undefined
-
-    - meta: clear_host_errors
-
-# Use the existing node_exporter deployment playbook
-- import_playbook: deploy_node_exporter.yaml
-  vars:
-    # Use reachable_hosts instead of all
-    target_hosts: reachable_hosts
-
-# Register successfully deployed exporters with Prometheus
-- name: Register Node Exporters with Prometheus
-  hosts: localhost
-  gather_facts: no
-  vars:
-    # Get list of hosts that had successful node exporter deployment
-    successfully_deployed: "{{ groups.get('reachable_hosts', []) }}"
-    auto_register_with_prometheus: "{{ auto_register_with_prometheus | default(true) }}"
-    
-  tasks:
+    # Display deployment summary
     - name: Display deployment summary
       debug:
         msg: |
           Node Exporter Deployment Summary:
           ===============================
-          Total hosts processed: {{ groups.get('all', []) | length }}
-          Reachable hosts: {{ groups.get('reachable_hosts', []) | length }}
-          Successfully deployed to: {{ successfully_deployed | length }} hosts
+          Total hosts processed: {{ ansible_play_hosts | length }}
+          Successfully processed: {{ ansible_play_hosts | length }} hosts
           
-          Deployed hosts:
-          {% for host in successfully_deployed %}
+          Processed hosts:
+          {% for host in ansible_play_hosts %}
           - {{ host }}
           {% endfor %}
           
-          Auto-register with Prometheus: {{ auto_register_with_prometheus }}
+          Skip installation: {{ skip_node_exporter_install | default(false) }}
+          Auto-register with Prometheus: {{ auto_register_with_prometheus | default(true) }}
+          Prometheus host: {{ prometheus_host | default('prometheus_servers') }}
+          Prometheus port: {{ prometheus_host_port | default(9191) }}
+      run_once: true
 
     - name: Final deployment status (before registration)
       debug:
@@ -57,22 +38,31 @@
           NODE EXPORTER DEPLOYMENT COMPLETE
           =======================================================
           
-          ✓ Node exporters deployed: {{ successfully_deployed | length }} hosts
-          ✓ Prometheus registration: {{ 'AUTOMATIC (calling API update)' if auto_register_with_prometheus else 'MANUAL' }}
+          ✓ Node exporters {{ 'configured' if skip_node_exporter_install | default(false) else 'deployed' }}: {{ ansible_play_hosts | length }} hosts
+          ✓ Prometheus registration: {{ 'AUTOMATIC (calling API update)' if auto_register_with_prometheus | default(true) else 'MANUAL' }}
           
-          {% if not auto_register_with_prometheus %}
+          {% if not (auto_register_with_prometheus | default(true)) %}
           To register manually, run:
-          ansible-playbook prometheus_exporter/update_prometheus_targets.yaml \
-            -e "hosts_to_add={{ successfully_deployed | join(',') }}"
+          ansible-playbook prometheus_exporter/deploy_and_register_exporter.yaml \
+            -e "hosts_to_add={{ ansible_play_hosts | join(',') }}" \
+            -e "skip_node_exporter_install=true"
           {% endif %}
+      run_once: true
 
-# Call the target update playbook as a separate playbook
-- import_playbook: update_prometheus_targets.yaml
-  vars:
-    hosts_to_add: "{{ hostvars['localhost']['successfully_deployed'] }}"
-    prometheus_host: "{{ prometheus_host }}"
-    prometheus_host_port: "{{ prometheus_host_port | default(9191) }}"
-  when: 
-    - auto_register_with_prometheus | default(true) | bool
-    - hostvars['localhost']['successfully_deployed'] is defined
-    - hostvars['localhost']['successfully_deployed'] | length > 0
+    # Update Prometheus targets (runs on prometheus host)  
+    - block:
+        - name: Include prometheus_targets role
+          include_role:
+            name: prometheus_targets
+          vars:
+            hosts_to_add: "{{ ansible_play_hosts }}"
+            hosts_to_remove: []
+            backup_prometheus_config: true
+            validate_prometheus_config: true
+      delegate_to: "{{ prometheus_host | default('prometheus_servers') }}"
+      become: true
+      run_once: true
+      when: 
+        - auto_register_with_prometheus | default(true) | bool
+        - ansible_play_hosts | length > 0
+

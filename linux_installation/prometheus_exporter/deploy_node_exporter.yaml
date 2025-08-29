@@ -1,20 +1,4 @@
 ---
-- name: Pre-check and gather facts
-  hosts: all
-  gather_facts: no
-  tasks:
-    - name: Gather facts
-      setup:
-      register: fact_result
-      ignore_unreachable: true
-
-    - name: Add reachable hosts to group
-      group_by:
-        key: "reachable_hosts"
-      when: fact_result.unreachable is undefined
-
-    - meta: clear_host_errors
-
 - name: Install Prometheus Node Exporter
   hosts: reachable_hosts
   become: true
@@ -39,6 +23,13 @@
         temp_binary: "/tmp/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}/node_exporter"
 
   tasks:
+    - name: Set prometheus host and port
+      set_fact:
+        prometheus_host: "{{ prometheus_host | default('prometheus_servers') }}"
+        prometheus_host_port: "{{ prometheus_host_port | default(9191) }}"
+      delegate_to: localhost
+      delegate_facts: true
+
     - name: Gather facts about services
       service_facts:
       register: services_state
