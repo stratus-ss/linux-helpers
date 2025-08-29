@@ -50,25 +50,27 @@
           
           Auto-register with Prometheus: {{ auto_register_with_prometheus }}
 
-    - name: Register with Prometheus via API
-      include_tasks: update_prometheus_targets.yaml
-      vars:
-        hosts_to_add: "{{ successfully_deployed }}"
-        prometheus_host: "{{ prometheus_host | default('prometheus_servers') }}"
-      when: 
-        - auto_register_with_prometheus | bool
-        - successfully_deployed | length > 0
-
-    - name: Final deployment status
+    - name: Final deployment status (before registration)
       debug:
         msg: |
           =======================================================
-          DEPLOYMENT COMPLETE
+          NODE EXPORTER DEPLOYMENT COMPLETE
           =======================================================
           
           ✓ Node exporters deployed: {{ successfully_deployed | length }} hosts
-          ✓ Prometheus registration: {{ 'AUTOMATIC' if auto_register_with_prometheus else 'MANUAL' }}
+          ✓ Prometheus registration: {{ 'AUTOMATIC (calling API update)' if auto_register_with_prometheus else 'MANUAL' }}
           
-          {% if auto_register_with_prometheus %}
-          Check Prometheus targets: http://containers.example.com:9191/targets
+          {% if not auto_register_with_prometheus %}
+          To register manually, run:
+          ansible-playbook prometheus_exporter/update_prometheus_targets.yaml \
+            -e "hosts_to_add={{ successfully_deployed | join(',') }}"
           {% endif %}
+
+# Call the target update playbook as a separate playbook
+- import_playbook: update_prometheus_targets.yaml
+  vars:
+    hosts_to_add: "{{ hostvars['localhost']['successfully_deployed'] }}"
+  when: 
+    - auto_register_with_prometheus | default(true) | bool
+    - hostvars['localhost']['successfully_deployed'] is defined
+    - hostvars['localhost']['successfully_deployed'] | length > 0

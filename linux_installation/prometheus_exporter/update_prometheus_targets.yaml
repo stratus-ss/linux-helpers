@@ -33,6 +33,10 @@
       register: prometheus_health_external
       ignore_errors: yes
 
+    - name: Set working API URL
+      set_fact:
+        working_api_url: "{{ prometheus_api_url }}"
+
     - name: Fail if Prometheus is not running
       fail:
         msg: |
@@ -42,7 +46,6 @@
           Please ensure Prometheus is running and accessible.
       when: 
         - prometheus_health_external is failed
-
 
     - name: Get current Prometheus configuration via API
       uri:
@@ -88,8 +91,6 @@
           ... and {{ current_targets | length - 10 }} more
           {% endif %}
           {% endif %}
-
-
 
     - name: Build new targets list
       set_fact:
