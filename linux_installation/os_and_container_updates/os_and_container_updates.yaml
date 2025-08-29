@@ -1,0 +1,121 @@
+---
+- name: Perform OS Updates with VM Detection and Docker Compose Management
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: yes
+  become: true
+  vars:
+    # Default configuration - can be overridden via extra vars
+    # Role execution control
+    skip_system_detection: false     # Skip VM/OS detection (not recommended)
+    skip_os_updates: false           # Skip operating system updates
+    skip_docker_updates: false      # Skip Docker Compose updates
+    skip_post_actions: false        # Skip post-update actions (shutdown/reboot)
+    
+    # Legacy variables (maintained for backward compatibility)
+    perform_os_updates: true
+    perform_docker_updates: true
+    
+    # Update behavior
+    auto_shutdown_vms: true
+    backup_before_update: false
+    reboot_after_updates: false
+    update_timeout: 3600  # 1 hour timeout for updates
+
+  tasks:
+    - name: Display update summary
+      debug:
+        msg: |
+          OS Updates Playbook Started
+          ===========================
+          Target hosts: {{ ansible_play_hosts | length }}
+          
+          Role Execution Plan:
+          - System Detection: {{ 'ENABLED' if not (skip_system_detection | default(false) | bool) else 'SKIPPED' }}
+          - OS Updates: {{ 'ENABLED' if not (skip_os_updates | default(false) | bool) and (perform_os_updates | default(true) | bool) else 'SKIPPED' }}
+          - Docker Updates: {{ 'ENABLED' if not (skip_docker_updates | default(false) | bool) and (perform_docker_updates | default(true) | bool) else 'SKIPPED' }}
+          - Post Actions: {{ 'ENABLED' if not (skip_post_actions | default(false) | bool) else 'SKIPPED' }}
+          
+          Configuration:
+          - Auto VM Shutdown: {{ auto_shutdown_vms }}
+          - Backup before update: {{ backup_before_update }}
+          - Reboot after updates: {{ reboot_after_updates }}
+          - Update timeout: {{ update_timeout }}s
+      run_once: true
+
+    - name: Detect system type and capabilities
+      include_role:
+        name: system_detection
+      when: not (skip_system_detection | default(false) | bool)
+      tags:
+        - detection
+        
+    - name: Set default facts when system detection is skipped
+      set_fact:
+        is_virtual_machine: false
+        virtualization_type: "unknown"
+        docker_installed: false
+        os_updates_successful: false
+        docker_updates_successful: false
+      when: skip_system_detection | default(false) | bool
+
+    - name: Perform OS updates
+      include_role:
+        name: os_updates
+      when: 
+        - not (skip_os_updates | default(false) | bool)
+        - perform_os_updates | default(true) | bool
+      tags:
+        - os_updates
+
+    - name: Update Docker Compose services
+      include_role:
+        name: docker_compose_updates
+      when: 
+        - not (skip_docker_updates | default(false) | bool)
+        - perform_docker_updates | default(true) | bool
+        - docker_installed is defined and docker_installed | bool
+      tags:
+        - docker_updates
+
+    - name: Post-update actions
+      include_role:
+        name: post_update_actions
+      when: not (skip_post_actions | default(false) | bool)
+      tags:
+        - post_actions
+
+    - name: Final status report
+      debug:
+        msg: |
+          =======================================================
+          OS UPDATES PLAYBOOK COMPLETE
+          =======================================================
+          
+          Role Execution Summary:
+          {% if not (skip_system_detection | default(false) | bool) %}
+          ✓ System detection: {{ 'VM (' + (virtualization_type | default('unknown')) + ')' if is_virtual_machine | default(false) else 'Physical' }}
+          ✓ OS type: {{ ansible_distribution | default('Unknown') }} {{ ansible_distribution_version | default('') }}
+          {% else %}
+          ⊝ System detection: SKIPPED
+          {% endif %}
+          {% if not (skip_os_updates | default(false) | bool) and (perform_os_updates | default(true) | bool) %}
+          ✓ OS updates: {{ 'COMPLETED' if os_updates_successful | default(false) else 'FAILED' }}
+          {% else %}
+          ⊝ OS updates: SKIPPED
+          {% endif %}
+          {% if not (skip_docker_updates | default(false) | bool) and (perform_docker_updates | default(true) | bool) %}
+          ✓ Docker updates: {{ 'COMPLETED' if docker_updates_successful | default(false) else 'FAILED/NO_DOCKER' }}
+          {% else %}
+          ⊝ Docker updates: SKIPPED
+          {% endif %}
+          {% if not (skip_post_actions | default(false) | bool) %}
+          {% if is_virtual_machine | default(false) and auto_shutdown_vms | default(true) and not (skip_post_actions | default(false) | bool) %}
+          ⚠ Post actions: VM SHUTDOWN INITIATED
+          {% else %}
+          ✓ Post actions: COMPLETED
+          {% endif %}
+          {% else %}
+          ⊝ Post actions: SKIPPED
+          {% endif %}
+      tags:
+        - always

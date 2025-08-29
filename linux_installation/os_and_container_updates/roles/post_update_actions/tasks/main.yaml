@@ -1,0 +1,148 @@
+---
+- name: Determine post-update actions needed
+  set_fact:
+    # Physical machines NEVER get automatic reboots
+    should_reboot: false
+    
+    # Only VMs get shutdown (never reboot)
+    should_shutdown_vm: >-
+      {{ 
+        is_virtual_machine | default(false) | bool and 
+        auto_shutdown_vms | default(true) | bool and
+        os_updates_successful | default(false) | bool
+      }}
+    
+    # Track if manual reboot is needed for physical machines
+    manual_reboot_recommended: >-
+      {{
+        not (is_virtual_machine | default(false) | bool) and
+        reboot_required | default(false) | bool
+      }}
+
+- name: Display post-update action plan
+  debug:
+    msg: |
+      Post-Update Action Plan:
+      ========================
+      System Type: {{ 'Virtual Machine' if is_virtual_machine else 'Physical Machine' }}
+      OS Updates: {{ 'Successful' if os_updates_successful else 'Failed/Skipped' }}
+      Docker Updates: {{ 'Successful' if docker_updates_successful else 'Failed/Skipped' }}
+      Reboot Required: {{ 'Yes' if reboot_required | default(false) else 'No' }}
+      Auto VM Shutdown: {{ 'Yes' if auto_shutdown_vms | default(true) else 'No' }}
+      
+      Planned Actions:
+      {% if should_shutdown_vm %}
+      - Virtual Machine will SHUTDOWN (never reboots)
+      {% elif manual_reboot_recommended %}
+      - Physical Machine: Manual reboot recommended (no auto-reboot)
+      {% else %}
+      - No automatic actions required
+      {% endif %}
+      
+      Policy: Physical machines NEVER auto-reboot, VMs only shutdown
+
+- name: Handle physical machines that need manual reboot
+  block:
+    - name: Notify about manual reboot requirement
+      debug:
+        msg: |
+          ⚠️  MANUAL REBOOT REQUIRED (PHYSICAL MACHINE)
+          ==============================================
+          This physical machine requires a manual reboot to complete updates.
+          
+          System: {{ ansible_hostname }}
+          Type: Physical Machine
+          OS Updates: {{ 'Successful' if os_updates_successful else 'Failed/Skipped' }}
+          
+          🚫 AUTOMATIC REBOOT DISABLED for physical machines
+          👤 Please reboot manually when convenient:
+             sudo reboot
+             
+          Updates that may require reboot:
+          - Kernel updates
+          - System library updates
+          - Security updates
+
+  when: manual_reboot_recommended and os_updates_successful
+
+- name: Handle VM shutdown after successful updates
+  block:
+    - name: Notify about VM shutdown
+      debug:
+        msg: |
+          🔌 VIRTUAL MACHINE SHUTDOWN
+          ===========================
+          This virtual machine will be shut down in 30 seconds.
+          
+          Updates completed successfully:
+          - OS Updates: {{ 'Yes' if os_updates_successful else 'No' }}
+          - Docker Updates: {{ 'Yes' if docker_updates_successful else 'No' }}
+          
+          The VM can be manually started again when needed.
+
+    - name: Final status before shutdown
+      debug:
+        msg: |
+          Final System Status:
+          ===================
+          Hostname: {{ ansible_hostname }}
+          Virtualization: {{ virtualization_type | default('unknown') }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Updates Successful: {{ os_updates_successful | default(false) }}
+          Docker Updates: {{ docker_updates_successful | default(false) }}
+          
+          VM will shutdown in 30 seconds...
+
+    - name: Wait before VM shutdown
+      pause:
+        seconds: 30
+        prompt: "VM will shutdown in 30 seconds. Press Ctrl+C to cancel shutdown."
+
+    - name: Shutdown the virtual machine
+      shell: |
+        # Schedule immediate shutdown
+        /sbin/shutdown -h now "Automated shutdown after OS updates"
+      async: 1
+      poll: 0
+      become: true
+
+    - name: Confirm shutdown initiated
+      debug:
+        msg: |
+          🔌 Shutdown command issued for VM: {{ ansible_hostname }}
+          The virtual machine should power off momentarily.
+
+  when: should_shutdown_vm
+
+- name: Handle completion without restart/shutdown
+  debug:
+    msg: |
+      ✅ UPDATE PROCESS COMPLETE
+      ==========================
+      No automatic restart or shutdown actions performed.
+      
+      System Status:
+      - Type: {{ 'Virtual Machine' if is_virtual_machine else 'Physical Machine' }}
+      - OS Updates: {{ 'Success' if os_updates_successful else 'Failed/Skipped' }}
+      - Docker Updates: {{ 'Success' if docker_updates_successful else 'Failed/Skipped' }}
+      {% if is_virtual_machine %}
+      - VM Action: {{ 'Shutdown skipped (disabled or failed updates)' if not should_shutdown_vm else 'Will be handled separately' }}
+      {% else %}
+      - Physical Machine: {{ 'Manual reboot recommended' if reboot_required | default(false) else 'No reboot needed' }}
+      {% endif %}
+      
+      Policy Reminder:
+      - Physical machines: NEVER auto-reboot (manual only)
+      - Virtual machines: Auto-shutdown only (never reboot)
+  when: not should_shutdown_vm and not manual_reboot_recommended
+
+- name: Log final system state
+  shell: |
+    echo "$(date): Update process completed on {{ ansible_hostname }}" >> /var/log/ansible-updates.log
+    echo "  - System Type: {{ 'VM' if is_virtual_machine else 'Physical' }}" >> /var/log/ansible-updates.log
+    echo "  - OS Updates: {{ 'Success' if os_updates_successful else 'Failed' }}" >> /var/log/ansible-updates.log
+    echo "  - Docker Updates: {{ 'Success' if docker_updates_successful else 'Failed' }}" >> /var/log/ansible-updates.log
+    echo "  - Action Taken: {{ 'VM-Shutdown' if should_shutdown_vm else ('Manual-Reboot-Recommended' if manual_reboot_recommended else 'None') }}" >> /var/log/ansible-updates.log
+    echo "  - Policy: Physical=NoAutoReboot, VM=ShutdownOnly" >> /var/log/ansible-updates.log
+  failed_when: false
+  become: true

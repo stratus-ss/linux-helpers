@@ -1,0 +1,117 @@
+---
+- name: Gather system facts
+  setup:
+  tags:
+    - facts
+
+- name: Check if system is running in a virtual machine
+  block:
+    - name: Check systemd-detect-virt (primary method)
+      command: systemd-detect-virt
+      register: systemd_virt_result
+      failed_when: false
+      changed_when: false
+      
+    - name: Check DMI product name for VM indicators
+      slurp:
+        src: /sys/devices/virtual/dmi/id/product_name
+      register: dmi_product_name
+      failed_when: false
+      
+    - name: Check DMI system vendor for VM indicators
+      slurp:
+        src: /sys/devices/virtual/dmi/id/sys_vendor
+      register: dmi_sys_vendor
+      failed_when: false
+
+    - name: Determine if system is virtual
+      set_fact:
+        is_virtual_machine: >-
+          {{
+            (systemd_virt_result.rc == 0 and systemd_virt_result.stdout != "none") or
+            (dmi_product_name.content is defined and 
+             (dmi_product_name.content | b64decode | lower) | regex_search('(virtual|vmware|qemu|kvm|xen|virtualbox|hyperv)')) or
+            (dmi_sys_vendor.content is defined and 
+             (dmi_sys_vendor.content | b64decode | lower) | regex_search('(vmware|qemu|microsoft|xen|innotek)'))
+          }}
+
+    - name: Set virtualization details
+      set_fact:
+        virtualization_type: >-
+          {% if systemd_virt_result.rc == 0 and systemd_virt_result.stdout != "none" %}
+          {{ systemd_virt_result.stdout }}
+          {% else %}
+          unknown
+          {% endif %}
+
+- name: Detect operating system specifics
+  set_fact:
+    os_family: "{{ ansible_os_family | lower }}"
+    os_distribution: "{{ ansible_distribution | lower }}"
+    os_version: "{{ ansible_distribution_version }}"
+    is_arch_linux: "{{ ansible_distribution | lower == 'archlinux' }}"
+    is_redhat_family: "{{ ansible_os_family | lower == 'redhat' }}"
+    is_debian_family: "{{ ansible_os_family | lower == 'debian' }}"
+
+- name: Check if Docker is installed and running
+  block:
+    - name: Check if Docker service exists
+      systemd:
+        name: docker
+      register: docker_service_check
+      failed_when: false
+
+    - name: Check Docker version if service exists
+      command: docker --version
+      register: docker_version_check
+      failed_when: false
+      changed_when: false
+      when: docker_service_check.status is defined
+
+    - name: Set Docker installation status
+      set_fact:
+        docker_installed: >-
+          {{ 
+            docker_service_check.status is defined and 
+            docker_version_check is defined and 
+            docker_version_check.rc == 0 
+          }}
+        docker_version: >-
+          {% if docker_version_check is defined and docker_version_check.rc == 0 %}
+          {{ docker_version_check.stdout | regex_replace('^Docker version ([^,]+).*', '\\1') }}
+          {% else %}
+          not_installed
+          {% endif %}
+
+- name: Check if yay (AUR helper) is available on Arch Linux
+  command: which yay
+  register: yay_check
+  failed_when: false
+  changed_when: false
+  when: is_arch_linux | bool
+
+- name: Set yay availability
+  set_fact:
+    yay_available: >-
+      {{ 
+        is_arch_linux | bool and 
+        yay_check is defined and 
+        yay_check.rc == 0 
+      }}
+
+- name: Display system detection results
+  debug:
+    msg: |
+      System Detection Results:
+      =========================
+      Hostname: {{ ansible_hostname }}
+      System Type: {{ 'Virtual Machine (' + virtualization_type + ')' if is_virtual_machine else 'Physical Machine' }}
+      OS Family: {{ os_family }}
+      Distribution: {{ ansible_distribution }} {{ os_version }}
+      Architecture: {{ ansible_architecture }}
+      Docker Installed: {{ 'Yes (' + docker_version + ')' if docker_installed else 'No' }}
+      {% if is_arch_linux %}
+      Yay (AUR) Available: {{ 'Yes' if yay_available else 'No' }}
+      {% endif %}
+  tags:
+    - always

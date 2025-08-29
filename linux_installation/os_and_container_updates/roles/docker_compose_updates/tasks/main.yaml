@@ -1,0 +1,112 @@
+---
+- name: Initialize Docker Compose update status
+  set_fact:
+    docker_updates_successful: false
+    compose_projects_found: []
+    compose_projects_updated: []
+    compose_update_errors: []
+
+- name: Skip Docker updates if Docker not installed
+  block:
+    - name: Display skip message
+      debug:
+        msg: "Docker is not installed or not running. Skipping Docker Compose updates."
+    
+    - name: Set skip status
+      set_fact:
+        docker_updates_successful: true  # Not an error, just skipped
+  when: not (docker_installed | default(false) | bool)
+
+- name: Discover and update Docker Compose projects
+  block:
+    - name: Find all running Docker containers
+      shell: docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Labels}}" | grep -v NAMES
+      register: running_containers_raw
+      failed_when: false
+      changed_when: false
+
+    - name: Parse running containers for Compose projects
+      set_fact:
+        running_containers: >-
+          {{
+            running_containers_raw.stdout_lines | default([]) | 
+            map('regex_replace', '\\s+', '|') |
+            map('split', '|') |
+            selectattr('2', 'defined') |
+            selectattr('2', 'match', '.*com.docker.compose.project.*') |
+            list
+          }}
+      when: running_containers_raw.rc == 0
+
+    - name: Extract unique Compose project working directories
+      shell: |
+        docker inspect --format='{{`{{index .Config.Labels "com.docker.compose.project.working_dir"}}`}}' \
+        $(docker ps --filter "label=com.docker.compose.project" --format "{{`{{.Names}}`}}")
+      register: compose_working_dirs_raw
+      failed_when: false
+      changed_when: false
+
+    - name: Create list of unique Compose project directories
+      set_fact:
+        compose_projects_found: >-
+          {{
+            compose_working_dirs_raw.stdout_lines | default([]) |
+            select('match', '^/.+') |
+            unique |
+            list
+          }}
+      when: compose_working_dirs_raw.rc == 0
+
+    - name: Display discovered Compose projects
+      debug:
+        msg: |
+          Docker Compose Projects Discovered:
+          ====================================
+          {% if compose_projects_found | length > 0 %}
+          {% for project in compose_projects_found %}
+          - {{ project }}
+          {% endfor %}
+          {% else %}
+          No Docker Compose projects found.
+          {% endif %}
+
+    - name: Update each Docker Compose project
+      include_tasks: update_single_compose_project.yaml
+      loop: "{{ compose_projects_found }}"
+      loop_control:
+        loop_var: project_path
+      when: compose_projects_found | length > 0
+
+    - name: Set overall Docker updates success status
+      set_fact:
+        docker_updates_successful: >-
+          {{
+            (compose_projects_found | length == 0) or
+            (compose_update_errors | length == 0)
+          }}
+
+  when: docker_installed | default(false) | bool
+
+- name: Display Docker Compose update results
+  debug:
+    msg: |
+      Docker Compose Update Results:
+      ==============================
+      Docker Installed: {{ 'Yes' if docker_installed else 'No' }}
+      Projects Found: {{ compose_projects_found | length }}
+      Projects Updated: {{ compose_projects_updated | length }}
+      Update Success: {{ 'Yes' if docker_updates_successful else 'No' }}
+      {% if compose_update_errors | length > 0 %}
+      
+      Errors encountered:
+      {% for error in compose_update_errors %}
+      - {{ error }}
+      {% endfor %}
+      {% endif %}
+      
+      {% if compose_projects_updated | length > 0 %}
+      Successfully updated projects:
+      {% for project in compose_projects_updated %}
+      - {{ project }}
+      {% endfor %}
+      {% endif %}

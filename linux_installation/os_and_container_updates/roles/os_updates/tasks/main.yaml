@@ -1,0 +1,214 @@
+---
+- name: Initialize update status
+  set_fact:
+    os_updates_successful: false
+    packages_updated: []
+    update_errors: []
+
+- name: Create backup of important configs (if enabled)
+  block:
+    - name: Create backup directory
+      file:
+        path: "/tmp/os_update_backup_{{ ansible_date_time.epoch }}"
+        state: directory
+        mode: '0755'
+      
+    - name: Backup package manager configurations
+      copy:
+        src: "{{ item }}"
+        dest: "/tmp/os_update_backup_{{ ansible_date_time.epoch }}/"
+        remote_src: yes
+      loop:
+        - "/etc/apt/sources.list"  # Debian/Ubuntu
+        - "/etc/yum.repos.d/"     # RHEL/CentOS
+        - "/etc/pacman.conf"      # Arch Linux
+      failed_when: false
+      when: backup_before_update | default(false) | bool
+
+- name: Update package cache and perform OS updates
+  block:
+    # Arch Linux updates with yay
+    - name: Update Arch Linux packages with yay (including AUR)
+      block:
+        - name: Update official repositories with pacman
+          community.general.pacman:
+            update_cache: yes
+            upgrade: yes
+            force: no
+          register: pacman_update_result
+          become: true
+          timeout: "{{ update_timeout | default(3600) }}"
+
+        - name: Update AUR packages with yay
+          shell: |
+            # Run yay as the main user (not root)
+            sudo -u "{{ ansible_user_id }}" yay -Syu --noconfirm --noprogressbar
+          register: yay_update_result
+          timeout: "{{ update_timeout | default(3600) }}"
+          when: yay_available | default(false) | bool
+
+        - name: Set Arch update status
+          set_fact:
+            os_updates_successful: true
+            packages_updated: >-
+              {{
+                (pacman_update_result.packages | default([])) + 
+                (['AUR packages updated'] if yay_available and yay_update_result.rc == 0 else [])
+              }}
+      when: is_arch_linux | default(false) | bool
+      tags:
+        - arch_updates
+
+    # RedHat family updates (RHEL, CentOS, Fedora, etc.)
+    - name: Update RedHat family packages
+      block:
+        - name: Update packages with dnf/yum
+          dnf:
+            name: '*'
+            state: latest
+            update_cache: yes
+          register: redhat_update_result
+          timeout: "{{ update_timeout | default(3600) }}"
+          when: ansible_pkg_mgr in ['dnf', 'yum']
+
+        - name: Set RedHat update status
+          set_fact:
+            os_updates_successful: true
+            packages_updated: "{{ redhat_update_result.results | default([]) }}"
+      when: is_redhat_family | default(false) | bool
+      tags:
+        - redhat_updates
+
+    # Debian family updates (Ubuntu, Debian, etc.)
+    - name: Update Debian family packages
+      block:
+        - name: Update apt cache
+          apt:
+            update_cache: yes
+            cache_valid_time: 3600
+          
+        - name: Upgrade all packages
+          apt:
+            upgrade: dist
+            autoremove: yes
+            autoclean: yes
+          register: debian_update_result
+          timeout: "{{ update_timeout | default(3600) }}"
+
+        - name: Set Debian update status
+          set_fact:
+            os_updates_successful: true
+            packages_updated: "{{ debian_update_result.stdout_lines | default([]) }}"
+      when: is_debian_family | default(false) | bool
+      tags:
+        - debian_updates
+
+    # SUSE family updates
+    - name: Update SUSE family packages
+      block:
+        - name: Update packages with zypper
+          zypper:
+            name: '*'
+            state: latest
+            update_cache: yes
+          register: suse_update_result
+          timeout: "{{ update_timeout | default(3600) }}"
+
+        - name: Set SUSE update status
+          set_fact:
+            os_updates_successful: true
+            packages_updated: "{{ suse_update_result.results | default([]) }}"
+      when: ansible_os_family | lower == 'suse'
+      tags:
+        - suse_updates
+
+  rescue:
+    - name: Handle update failures
+      set_fact:
+        os_updates_successful: false
+        update_errors: "{{ update_errors + [ansible_failed_result.msg | default('Unknown error during OS updates')] }}"
+      
+    - name: Log update failure
+      debug:
+        msg: |
+          ❌ OS Update Failed:
+          Error: {{ ansible_failed_result.msg | default('Unknown error') }}
+          
+          This could be due to:
+          - Network connectivity issues
+          - Repository configuration problems  
+          - Dependency conflicts
+          - Insufficient disk space
+
+- name: Clean up package manager caches (optional)
+  block:
+    - name: Clean pacman cache (Arch)
+      shell: pacman -Sc --noconfirm
+      when: is_arch_linux | default(false) | bool and os_updates_successful
+
+    - name: Clean dnf cache (RedHat)
+      dnf:
+        autoremove: yes
+      when: is_redhat_family | default(false) | bool and os_updates_successful
+
+    - name: Clean apt cache (Debian)
+      apt:
+        autoclean: yes
+        autoremove: yes
+      when: is_debian_family | default(false) | bool and os_updates_successful
+  when: os_updates_successful | default(false) | bool
+
+- name: Display OS update results
+  debug:
+    msg: |
+      OS Update Results:
+      ==================
+      Status: {{ 'SUCCESS' if os_updates_successful else 'FAILED' }}
+      OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      Package Manager: {{ ansible_pkg_mgr | default('unknown') }}
+      {% if is_arch_linux and yay_available %}
+      AUR Updates: {{ 'Completed' if yay_available and yay_update_result is defined and yay_update_result.rc == 0 else 'Skipped/Failed' }}
+      {% endif %}
+      {% if packages_updated | length > 0 %}
+      Packages Updated: {{ packages_updated | length }}
+      {% endif %}
+      {% if update_errors | length > 0 %}
+      Errors: {{ update_errors | join(', ') }}
+      {% endif %}
+
+- name: Check if reboot is required
+  block:
+    - name: Check for reboot required file (Debian/Ubuntu)
+      stat:
+        path: /var/run/reboot-required
+      register: debian_reboot_required
+      when: is_debian_family | default(false) | bool
+
+    - name: Check if kernel was updated (general check)
+      shell: |
+        if [[ "$(uname -r)" != "$(rpm -q kernel --last | head -1 | awk '{print $1}' | sed 's/kernel-//')" ]]; then
+          echo "reboot_needed"
+        else
+          echo "no_reboot_needed"  
+        fi
+      register: kernel_reboot_check
+      failed_when: false
+      changed_when: false
+      when: is_redhat_family | default(false) | bool
+
+    - name: Set reboot required fact
+      set_fact:
+        reboot_required: >-
+          {{
+            (debian_reboot_required is defined and debian_reboot_required.stat.exists) or
+            (kernel_reboot_check is defined and kernel_reboot_check.stdout == "reboot_needed")
+          }}
+
+- name: Display reboot status
+  debug:
+    msg: |
+      Reboot Status:
+      ==============
+      Reboot Required: {{ 'Yes' if reboot_required | default(false) else 'No' }}
+      Auto Reboot: {{ 'Yes' if reboot_after_updates | default(false) else 'No' }}
+  when: os_updates_successful | default(false) | bool
