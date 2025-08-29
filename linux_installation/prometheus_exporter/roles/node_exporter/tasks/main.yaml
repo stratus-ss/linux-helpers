@@ -1,0 +1,136 @@
+---
+# Node Exporter Installation Role - Main Tasks
+
+- name: Set default variables
+  set_fact:
+    node_exporter_version: "{{ node_exporter_version | default('1.8.2') }}"
+    node_exporter_port: "{{ node_exporter_port | default('9100') }}"
+    node_exporter_user: "{{ node_exporter_user | default('node_exporter') }}"
+    node_exporter_group: "{{ node_exporter_group | default('node_exporter') }}"
+    skip_node_exporter_install: "{{ skip_node_exporter_install | default(false) | bool }}"
+
+- name: Set computed variables
+  set_fact:
+    node_exporter_arch: >-
+      {%- if ansible_architecture == "armv7l" -%}linux-armv7
+      {%- elif ansible_architecture == "aarch64" -%}linux-arm64
+      {%- else -%}linux-amd64{%- endif -%}
+
+- name: Set download URL and binary paths
+  set_fact:
+    node_exporter_download_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}.tar.gz"
+    node_exporter_bin_path: "{{ '/root/.local/bin/node_exporter' if ansible_distribution == 'Endless OS' else '/usr/local/bin/node_exporter' }}"
+    temp_binary: "/tmp/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}/node_exporter"
+
+- name: Gather facts about services
+  service_facts:
+  register: services_state
+
+- name: Create node_exporter group
+  group:
+    name: "{{ node_exporter_group }}"
+    state: present
+  when: ansible_distribution != 'Endless OS'
+
+- name: Create node_exporter user
+  user:
+    name: "{{ node_exporter_user }}"
+    group: "{{ node_exporter_group }}"
+    shell: /bin/false
+    system: true
+    create_home: false
+  when: ansible_distribution != 'Endless OS'
+
+- name: Ensure /root/.local/bin directory exists
+  file:
+    path: "/root/.local/bin"
+    state: directory
+    mode: '0755'
+  when: ansible_distribution == 'Endless OS'
+
+- name: Check if temporary binary exists
+  stat:
+    path: "{{ temp_binary }}"
+  register: binary_stat
+
+- name: Check existing binary architecture
+  command: file {{ temp_binary }}
+  register: binary_check
+  when: binary_stat.stat.exists
+  ignore_errors: true
+
+- name: Remove existing files if architecture mismatch
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/node_exporter.tar.gz"
+    - "/tmp/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}"
+  when: >
+    binary_stat.stat.exists and 
+    binary_check is defined and 
+    binary_check.stdout is defined and
+    ((ansible_architecture in ['armv7l', 'aarch64'] and 'ARM' not in binary_check.stdout) or
+     (ansible_architecture not in ['armv7l', 'aarch64'] and 'x86-64' not in binary_check.stdout))
+
+- name: Download and extract node_exporter binary
+  block:
+    - name: Download node_exporter
+      get_url:
+        url: "{{ node_exporter_download_url }}"
+        dest: "/tmp/node_exporter.tar.gz"
+        mode: '0644'
+        force: yes
+
+    - name: Extract node_exporter
+      unarchive:
+        src: "/tmp/node_exporter.tar.gz"
+        dest: "/tmp"
+        remote_src: yes
+
+    - name: Verify extracted binary architecture
+      command: file {{ temp_binary }}
+      register: final_binary_check
+      failed_when: >
+        (ansible_architecture in ['armv7l', 'aarch64'] and 'ARM' not in final_binary_check.stdout) or
+        (ansible_architecture not in ['armv7l', 'aarch64'] and 'x86-64' not in final_binary_check.stdout)
+
+    - name: Copy binary to final location
+      copy:
+        src: "{{ temp_binary }}"
+        dest: "{{ node_exporter_bin_path }}"
+        remote_src: yes
+        mode: '0755'
+        owner: "{{ 'root' if ansible_distribution == 'Endless OS' else node_exporter_user }}"
+        group: "{{ 'root' if ansible_distribution == 'Endless OS' else node_exporter_group }}"
+
+- name: Create systemd service file
+  template:
+    src: "{{ 'node_exporter_immutable.service.j2' if ansible_distribution == 'Endless OS' else 'node_exporter.service.j2' }}"
+    dest: /etc/systemd/system/node_exporter.service
+    mode: '0644'
+
+- name: Start and enable node_exporter service
+  systemd:
+    name: node_exporter
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Open port {{ node_exporter_port }}/tcp when firewalld is active
+  ansible.posix.firewalld:
+    port: "{{ node_exporter_port }}/tcp"
+    state: enabled
+    permanent: true
+    immediate: yes
+  when:
+    - "'firewalld.service' in services_state.ansible_facts.services"
+    - "services_state.ansible_facts.services['firewalld.service'].state == 'running'"
+
+- name: Clean up temporary files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/node_exporter.tar.gz"
+    - "/tmp/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}"
