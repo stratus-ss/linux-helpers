@@ -1,0 +1,40 @@
+    - name: Ensure alias for nano is present in /etc/bashrc
+      lineinfile:
+        path: /etc/bashrc
+        line: "alias nano='nano -wET 4'"
+        state: present
+
+    - name: Add Docker Aliases to /etc/bashrc
+      lineinfile:
+        path: /etc/bashrc
+        line: "{{ item }}"
+        state: present
+      with_items:
+        - "alias docker-update='docker compose down && docker compose pull && docker compose up -d'"
+        - 'alias docker-workdir="docker inspect --format=\"{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}\""'
+        
+    - name: Ensure HISTSIZE is set in /etc/bashrc
+      lineinfile:
+        path: /etc/bashrc
+        regexp: '^HISTSIZE='
+        line: "HISTSIZE=10000"
+        state: present
+
+    - name: Ensure HISTFILESIZE is set in /etc/bashrc
+      lineinfile:
+        path: /etc/bashrc
+        regexp: '^HISTFILESIZE='
+        line: "HISTFILESIZE=20000"
+        state: present
+
+    - name: Add dynamic PS1 prompt with random hostname color
+      blockinfile:
+        path: /etc/bashrc
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Generate a random color for the hostname once at login
+          if [[ $- == *i* ]]; then
+              HOST_COLOR=$((RANDOM % 7 + 31))  # Generate a random ANSI color code (31-37)
+              USER_COLOR=$((RANDOM % 7 + 31))  # Generate a random ANSI color code (31-37)
+              PS1="\[\e[01;${USER_COLOR}m\]\u@\[\e[01;${HOST_COLOR}m\]\h \[\e[01;34m\]\w \[\e[00m\]$ "
+          fi
