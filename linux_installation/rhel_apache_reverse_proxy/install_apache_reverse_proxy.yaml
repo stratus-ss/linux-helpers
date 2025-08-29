@@ -1,21 +1,10 @@
 ---
 - name: Configure Container Hosts
-  hosts: virtualization
-  gather_facts: yes
+  hosts: "{{ apache_host }}"
+  gather_facts: true
   become: true
-# uncomment for local playbook
-#  vars:
-#    apache_install: true
-#    apache_packages:
-#      - httpd
-#      - mod_ssl
-#    vhosts:
-#      - name: example.com
-#        cert_file_location: /path/to/example.com.crt
-#        cert_key_file_location: /path/to/example.com.key
-#        app_port: 8080
 
-  tasks:
+  tasks:     
     - name: Retrieve Certs from Vault
       include_role:
         name: vault_read_certificates
