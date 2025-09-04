@@ -10,74 +10,57 @@
   tasks:
     - name: Set the facts
       set_fact:
-        ADDITIONAL_TRUST_BUNDLE: false
-        API_VIP: 10.0.1.40 
-        APP_VIP: 10.0.1.41
-        BASE_DOMAIN: ocp4.example.com
-        BOOTSTRAP_STATIC_IP: 10.0.2.95
-        BOOTSTRAP_GW: 10.0.1.7
-        BOOTSTRAP_DNS: 10.0.1.7
-        CLUSTER_NAME: one
+        ADDITIONAL_TRUST_BUNDLE: "{{ ADDITIONAL_TRUST_BUNDLE | default(false) }}"
+        API_VIP: "{{ API_VIP | default('') }}" 
+        APP_VIP: "{{ APP_VIP | default('') }}"
+        BASE_DOMAIN: "{{ BASE_DOMAIN | default('') }}"
+        BOOTSTRAP_STATIC_IP: "{{ BOOTSTRAP_STATIC_IP | default('') }}"
+        BOOTSTRAP_GW: "{{ BOOTSTRAP_GW | default('') }}"
+        BOOTSTRAP_DNS: "{{ BOOTSTRAP_DNS | default('') }}"
+        CLUSTER_NAME: "{{ CLUSTER_NAME | default('') }}"
         CLUSTER_NETWORK: 172.30.0.0/16
-        DNS_NAMESERVER: 10.0.1.7
-        HASHI_VAULT_URL: "https://vault.example.com"
+        DNS_NAMESERVER: "{{ DNS_NAMESERVER | default('') }}"
+        HASHI_VAULT_URL: "{{ HASHI_VAULT_URL | default('') }}"
         HASHI_VAULT_ROLE_ID: ""
         HASHI_VAULT_SECRET_ID:  ""
-        HASHI_VAULT_PATH: configs/data/{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
-        HTTPS_PROXY: "http://mirror-registry.ocp4.example.com:3128"
-        HTTP_PROXY: "http://mirror-registry.ocp4.example.com:3128"
-        INSTALL_USER: ocp
-        INSTALL_USER_BINARY_PATH: "/home/{{ INSTALL_USER }}/.local/bin/"
-        KVM_PACKAGES:
-          - qemu-kvm
-          - libvirt
-          - virt-install
-        LIBVIRT_POOL_NAME: "vm-nvmes"
-        LIBVIRT_POOL_DIRECTORY: "libvirt_nvmes"
-        LIBVIRT_DISK_PATH: "/var/lib/{{ LIBVIRT_POOL_DIRECTORY }}"
-        LIBVIRT_DISK_SIZE: 120
-        OPENSHIFT_VERSION: 4.17.11
-        OPENSHIFT_BAREMETAL_INSTALL: true
-        OPENSHFIT_DOWNLOAD_URL: "https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/{{ OPENSHIFT_VERSION }}"
-        OPENSHIFT_INSTALL_DIRECTORY: "/home/{{ INSTALL_USER }}/{{ CLUSTER_NAME }}"
-        NETWORK_BRIDGE: br0
-        NETWORK_INTERFACE: enp1s0
-        NETWORK_GATEWAY: 10.0.1.7
-        NETWORK_CIDR: 22
-        NO_PROXY: localhost,127.0.0.1,api.openshift.com,example.com
-        NUMBER_OF_MASTER_VMS: 3
-        NUMBER_OF_WORKER_VMS: 0
-        MACHINE_NETWORK: 10.0.5.0/22
+        HASHI_VAULT_PATH: "{{ HASHI_VAULT_PATH | default('configs/data/' + CLUSTER_NAME + '.' + BASE_DOMAIN) }}"
+        HTTPS_PROXY: "{{ HTTPS_PROXY | default('') }}"
+        HTTP_PROXY: "{{ HTTP_PROXY | default('') }}"
+        INSTALL_USER: "{{ INSTALL_USER | default('ocp') }}"
+        INSTALL_USER_BINARY_PATH: "{{ INSTALL_USER_BINARY_PATH | default('/home/' + INSTALL_USER + '/.local/bin/') }}"
+        KVM_PACKAGES: "{{ KVM_PACKAGES | default(['qemu-kvm', 'libvirt', 'virt-install']) }}"
+        LIBVIRT_POOL_NAME: "{{ LIBVIRT_POOL_NAME | default('default-pool') }}"
+        LIBVIRT_POOL_DIRECTORY: "{{ LIBVIRT_POOL_DIRECTORY | default('libvirt') }}"
+        LIBVIRT_DISK_PATH: "{{ LIBVIRT_DISK_PATH | default('/var/lib/' + LIBVIRT_POOL_DIRECTORY) }}"
+        LIBVIRT_DISK_SIZE: "{{ LIBVIRT_DISK_SIZE | default(120) }}"
+        OPENSHIFT_VERSION: "{{ OPENSHIFT_VERSION | default('4.18.14') }}"
+        OPENSHIFT_BAREMETAL_INSTALL: "{{ OPENSHIFT_BAREMETAL_INSTALL | default(true) }}"
+        OPENSHFIT_DOWNLOAD_URL: "{{ OPENSHFIT_DOWNLOAD_URL | default('https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/' + OPENSHIFT_VERSION) }}"
+        OPENSHIFT_INSTALL_DIRECTORY: "{{ OPENSHIFT_INSTALL_DIRECTORY | default('/home/' + INSTALL_USER + '/' + CLUSTER_NAME) }}"
+        NETWORK_BRIDGE: "{{ NETWORK_BRIDGE | default('br0') }}"
+        NETWORK_INTERFACE: "{{ NETWORK_INTERFACE | default('eth0') }}"
+        NETWORK_GATEWAY: "{{ NETWORK_GATEWAY | default('') }}"
+        NETWORK_CIDR: "{{ NETWORK_CIDR | default(24) }}"
+        NO_PROXY: "{{ NO_PROXY | default('localhost,127.0.0.1') }}"
+        NUMBER_OF_MASTER_VMS: "{{ NUMBER_OF_MASTER_VMS | default(3) }}"
+        NUMBER_OF_WORKER_VMS: "{{ NUMBER_OF_WORKER_VMS | default(0) }}"
+        MACHINE_NETWORK: "{{ MACHINE_NETWORK | default('') }}"
         REGISTRY_CERT_VAULT_PATH: "certificates/data/mirror-registry-cert"
         SSH_KEY: ""
         SERVICE_NETWORK: 172.29.0.0/20
-        SUSHY_SERVER: 10.0.1.1
-        VM_BRIDGE_INTERFACE: 
-          - br-vlan
-        VM_RAM_MB: 20480
-        VM_vCPUS: 6
-        VM_OS: rhel9.2.0
-        CONTROL_PLANE_NAMES:
-          - ocp-control1
-          - ocp-control2
-          - ocp-control3
-        WORKER_NAMES:
-          - ocp-worker1
-          - ocp-worker2
-          - ocp-worker3
-        VLANS:
-            enabled: true
-            bond_ports:
-              - "{{ NETWORK_INTERFACE }}"
-            bond_name: "bond0"
-            bond_mode: "active-backup"
-            machine_vlan_id: "94"
-            mtu: "1500"
-        BOND_SUBINTERFACE: "{{ VLANS.bond_name }}.{{ VLANS.machine_vlan_id }}"
+        SUSHY_SERVER: "{{ SUSHY_SERVER | default('') }}"
+        VM_BRIDGE_INTERFACE: "{{ VM_BRIDGE_INTERFACE | default(['br0']) }}"
+        VM_RAM_MB: "{{ VM_RAM_MB | default(16384) }}"
+        VM_vCPUS: "{{ VM_vCPUS | default(4) }}"
+        VM_OS: "{{ VM_OS | default('rhel9.2.0') }}"
+        CONTROL_PLANE_NAMES: "{{ CONTROL_PLANE_NAMES | default(['control1', 'control2', 'control3']) }}"
+        WORKER_NAMES: "{{ WORKER_NAMES | default(['worker1', 'worker2', 'worker3']) }}"
+        VLANS: "{{ VLANS | default({'enabled': false, 'bond_ports': [NETWORK_INTERFACE], 'bond_name': 'bond0', 'bond_mode': 'active-backup', 'machine_vlan_id': '1', 'mtu': '1500'}) }}"
+        BOND_SUBINTERFACE: "{{ BOND_SUBINTERFACE | default(VLANS.bond_name + '.' + VLANS.machine_vlan_id) }}"
 
         # IP address base for machine network - will be incremented for each node
-        MACHINE_IP_BASE: "192.168.95"
-        MACHINE_IP_START: 1
+        MACHINE_IP_BASE: "{{ MACHINE_IP_BASE | default('') }}"
+        MACHINE_IP_START: "{{ MACHINE_IP_START | default(1) }}"
 
     # Refactoring assisted by Cursor ussing Claude 4 Sonnet
     - name: Generate control plane node parameters
