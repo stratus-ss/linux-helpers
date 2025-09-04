@@ -1,7 +1,7 @@
 ---
 - name: Check if qcow2 disk image already exists
   ansible.builtin.stat:
-    path: "{{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2"
+    path: "{{ vm_libvirt_disk_path }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2"
   register: disk_image_stat
 
 - name: Check if VM is already defined
@@ -33,20 +33,21 @@
 - name: Display disk image status
   ansible.builtin.debug:
     msg: >
-      Disk image {{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2 
+      {{ node_type | title }} node disk image {{ vm_libvirt_disk_path }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2 
       {% if disk_image_stat.stat.exists %}already exists, skipping creation{% else %}does not exist, will create{% endif %}
+      (using {{ node_type }} storage pool: {{ vm_libvirt_pool_name }})
 
-- name: Create the disk image file ({{ LIBVIRT_DISK_SIZE }}GB)
+- name: Create the disk image file ({{ vm_libvirt_disk_size }}GB) for {{ node_type }} node
   ansible.builtin.command: >
     qemu-img create -f qcow2 
-    {{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2 
-    {{ LIBVIRT_DISK_SIZE }}G
+    {{ vm_libvirt_disk_path }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2 
+    {{ vm_libvirt_disk_size }}G
   when: not disk_image_stat.stat.exists
   register: qemu_img_result
 
 - name: Set proper permissions on disk image
   ansible.builtin.file:
-    path: "{{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2"
+    path: "{{ vm_libvirt_disk_path }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2"
     owner: qemu
     group: qemu
     mode: '0660'
@@ -61,7 +62,7 @@
 - name: Refresh the storage pool
   community.libvirt.virt_pool:
     command: refresh
-    name: "{{ LIBVIRT_POOL_NAME }}"
+    name: "{{ vm_libvirt_pool_name }}"
   when: not disk_image_stat.stat.exists
 
 - name: Set interface and mac address facts for vm

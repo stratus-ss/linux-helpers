@@ -29,7 +29,7 @@
     <emulator>/usr/libexec/qemu-kvm</emulator>
     <disk type='file' device='disk'>
       <driver name='qemu' type='qcow2'/>
-      <source file='{{ LIBVIRT_DISK_PATH }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2'/>
+      <source file='{{ vm_libvirt_disk_path }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2'/>
       <target dev='vda' bus='virtio'/>
       <address type='pci' domain='0x0000' bus='0x05' slot='0x00' function='0x0'/>
     </disk>

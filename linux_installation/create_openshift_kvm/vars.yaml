@@ -38,7 +38,10 @@ KVM_PACKAGES:
   - qemu-kvm
   - libvirt
   - virt-install
-libvirt_pool_name: "vm-nvmes"
+
+# Libvirt Storage Configuration
+# These can be overridden via extra-vars or environment-specific variable files
+LIBVIRT_POOL_NAME: "vm-nvmes"
 LIBVIRT_POOL_DIRECTORY: "libvirt_nvmes"
 LIBVIRT_DISK_PATH: "/var/lib/{{ LIBVIRT_POOL_DIRECTORY }}"
 LIBVIRT_DISK_SIZE: 120
