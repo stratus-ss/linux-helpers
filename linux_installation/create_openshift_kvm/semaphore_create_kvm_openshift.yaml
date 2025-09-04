@@ -33,7 +33,13 @@
         LIBVIRT_POOL_DIRECTORY: "{{ LIBVIRT_POOL_DIRECTORY | default('libvirt') }}"
         LIBVIRT_DISK_PATH: "{{ LIBVIRT_DISK_PATH | default('/var/lib/' + LIBVIRT_POOL_DIRECTORY) }}"
         LIBVIRT_DISK_SIZE: "{{ LIBVIRT_DISK_SIZE | default(120) }}"
-        OPENSHIFT_VERSION: "{{ OPENSHIFT_VERSION | default('4.18.14') }}"
+        
+        # Optional worker-specific storage settings - fallback to control plane settings if not specified
+        WORKER_LIBVIRT_POOL_NAME: "{{ WORKER_LIBVIRT_POOL_NAME | default(LIBVIRT_POOL_NAME) }}"
+        WORKER_LIBVIRT_POOL_DIRECTORY: "{{ WORKER_LIBVIRT_POOL_DIRECTORY | default(LIBVIRT_POOL_DIRECTORY) }}"
+        WORKER_LIBVIRT_DISK_PATH: "{{ WORKER_LIBVIRT_DISK_PATH | default(LIBVIRT_DISK_PATH) }}"
+        WORKER_LIBVIRT_DISK_SIZE: "{{ WORKER_LIBVIRT_DISK_SIZE | default(LIBVIRT_DISK_SIZE) }}"
+        OPENSHIFT_VERSION: "{{ OPENSHIFT_VERSION | default('4.18.14h') }}"
         OPENSHIFT_BAREMETAL_INSTALL: "{{ OPENSHIFT_BAREMETAL_INSTALL | default(true) }}"
         OPENSHFIT_DOWNLOAD_URL: "{{ OPENSHFIT_DOWNLOAD_URL | default('https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/' + OPENSHIFT_VERSION) }}"
         OPENSHIFT_INSTALL_DIRECTORY: "{{ OPENSHIFT_INSTALL_DIRECTORY | default('/home/' + INSTALL_USER + '/' + CLUSTER_NAME) }}"
@@ -172,6 +178,11 @@
         - name: Create Control Plane VMs
           ansible.builtin.include_role:
             name: create_kvm_guest
+          vars:
+            vm_libvirt_disk_path: "{{ LIBVIRT_DISK_PATH }}"
+            vm_libvirt_pool_name: "{{ LIBVIRT_POOL_NAME }}"
+            vm_libvirt_disk_size: "{{ LIBVIRT_DISK_SIZE }}"
+            node_type: "control plane"
           loop: "{{ CONTROL_PLANE_NAMES }}"
           loop_control:
             loop_var: vm_name
@@ -180,6 +191,11 @@
         - name: Create Worker Plane VMs
           ansible.builtin.include_role:
             name: create_kvm_guest
+          vars:
+            vm_libvirt_disk_path: "{{ WORKER_LIBVIRT_DISK_PATH }}"
+            vm_libvirt_pool_name: "{{ WORKER_LIBVIRT_POOL_NAME }}"
+            vm_libvirt_disk_size: "{{ WORKER_LIBVIRT_DISK_SIZE }}"
+            node_type: "worker"
           loop: "{{ WORKER_NAMES }}"
           loop_control:
             loop_var: vm_name
