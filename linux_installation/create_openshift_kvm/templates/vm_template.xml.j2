@@ -29,11 +29,10 @@
     <emulator>/usr/libexec/qemu-kvm</emulator>
     <!-- PCI Bus Allocation Scheme:
          0x00: System devices (video, etc.)
-         0x01-0x0F: Reserved for system use
+         0x01-0x04: Network interfaces (0x01, 0x02, 0x03, 0x04)
          0x05: Storage devices (disk)
          0x06: Memory balloon
          0x07: Random number generator  
-         0x11+: Network interfaces (0x11, 0x12, 0x13, ...)
     -->
     <disk type='file' device='disk'>
       <driver name='qemu' type='qcow2'/>
@@ -45,7 +44,7 @@
     <interface type="bridge">
       <source bridge="{{ bridge }}"/>
       <model type="virtio"/>
-      <address type="pci" domain="0x0000" bus="0x{{ '%02x' | format(16 + loop.index) }}" slot="0x00" function="0x0"/>
+      <address type="pci" domain="0x0000" bus="0x{{ '%02x' | format(loop.index) }}" slot="0x00" function="0x0"/>
     </interface>
     {% endfor %}
     <channel type="unix">
