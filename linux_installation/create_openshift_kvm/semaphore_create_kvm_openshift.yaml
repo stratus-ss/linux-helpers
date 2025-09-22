@@ -275,6 +275,7 @@
       vars:
         vault_secret_key_name: install_config
         full_path_to_file: '{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml'
+      when: RETRIEVE_FROM_VAULT is defined and RETRIEVE_FROM_VAULT | bool
 
 - name: Configure DNS
   hosts: dns
@@ -321,6 +322,7 @@
       ansible.builtin.package:
         name: python3-hvac
         state: present
+      when: RETRIEVE_FROM_VAULT is defined and RETRIEVE_FROM_VAULT | bool
 
     - name: Ensure REMOTE {{ CLUSTER_NAME }} Directory Exists
       ansible.builtin.file:
@@ -340,12 +342,14 @@
         vault_path: "configs/data/{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
         fact_var_name: "INSTALL_CONFIG"
         certificate_data_path: "data.data.data.install_config"
-        decode_certificate: true    
+        decode_certificate: true
+      when: RETRIEVE_FROM_VAULT is defined and RETRIEVE_FROM_VAULT | bool    
 
     - name: Write retrieved certificate to local file
       copy:
         dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
         content: "{{ INSTALL_CONFIG }}"
+      when: RETRIEVE_FROM_VAULT is defined and RETRIEVE_FROM_VAULT | bool
 
 
     - name: Decide Which Binary to install with
