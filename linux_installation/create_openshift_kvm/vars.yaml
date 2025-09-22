@@ -8,6 +8,7 @@ BOOTSTRAP_DNS: 10.11.94.7
 CLUSTER_NAME: zzzzz
 CLUSTER_NETWORK: 172.30.0.0/16
 DNS_NAMESERVER: 10.11.94.7
+USE_PROXY: true
 HTTPS_PROXY: "http://mirror-registry.ocp4.example.com:3128"
 HTTP_PROXY: "http://mirror-registry.ocp4.example.com:3128"
 INSTALL_USER: ocp
@@ -60,6 +61,7 @@ VM_RAM_MB: 16384
 VM_vCPUS: 6
 VM_OS: rhel9.2.0
 
+RETRIEVE_FROM_VAULT: false
 HASHI_VAULT_URL: "https://vault.example.com"
 HASHI_VAULT_ROLE_ID: ""
 HASHI_VAULT_SECRET_ID:  ""

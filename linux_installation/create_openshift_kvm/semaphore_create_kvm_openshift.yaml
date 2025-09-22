@@ -52,7 +52,7 @@
         NUMBER_OF_WORKER_VMS: "{{ NUMBER_OF_WORKER_VMS | default(0) }}"
         MACHINE_NETWORK: "{{ MACHINE_NETWORK | default('') }}"
         REGISTRY_CERT_VAULT_PATH: "certificates/data/mirror-registry-cert"
-        SSH_KEY: ""
+        SSH_KEY: "{{ SSH_KEY | default('') }}"
         SERVICE_NETWORK: 172.29.0.0/20
         SUSHY_SERVER: "{{ SUSHY_SERVER | default('') }}"
         VM_BRIDGE_INTERFACE: "{{ VM_BRIDGE_INTERFACE | default(['br0']) }}"
@@ -155,14 +155,22 @@
         label: "{{ item.fact_name }}"
       when: RETRIEVE_FROM_VAULT is defined and RETRIEVE_FROM_VAULT | bool
 
-    - name: Ensure all required variables are defined and not empty
+    - name: Ensure boolean variables are defined
+      assert:
+        that:
+          - vars[item] is defined
+          - vars[item] is not none
+        fail_msg: "Variable '{{ item }}' is undefined. Playbook cannot continue."
+      loop:
+        - RETRIEVE_FROM_VAULT
+
+    - name: Ensure string variables are defined and not empty
       assert:
         that:
           - vars[item] is defined
           - vars[item] | length > 0
         fail_msg: "Variable '{{ item }}' is undefined or empty. Playbook cannot continue."
       loop: 
-        - RETRIEVE_FROM_VAULT
         - PULL_SECRET
         - SSH_KEY
 

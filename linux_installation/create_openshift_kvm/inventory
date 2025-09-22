@@ -1,6 +1,9 @@
 [all]
 localhost 
 
+[kvm]
+localhost
+
 [dns]
 pfsense ansible_host=pfsense.x86experts.com
 

@@ -102,11 +102,14 @@ platform:
                 next-hop-interface: {{ host.openshift_node_primary_nic }}
 {% endif %}
 {% endfor %} 
+
+{% if USE_PROXY is defined and USE_PROXY | bool %}
 proxy:
   httpsProxy: {{ HTTPS_PROXY }}
   httpProxy: {{ HTTP_PROXY }}
   noProxy: {{ NO_PROXY }}
- 
+{% endif %}
+
 {% if ADDITIONAL_TRUST_BUNDLE is defined and ADDITIONAL_TRUST_BUNDLE |length > 0 %}
 additionalTrustBundle: |
     {{ ADDITIONAL_TRUST_BUNDLE | indent(4)}}
