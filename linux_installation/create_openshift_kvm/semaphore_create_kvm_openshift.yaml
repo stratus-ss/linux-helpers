@@ -351,6 +351,20 @@
         content: "{{ INSTALL_CONFIG }}"
       when: RETRIEVE_FROM_VAULT is defined and RETRIEVE_FROM_VAULT | bool
 
+    - name: Get install-config.yaml content from KVM host (when not using vault)
+      slurp:
+        src: "{{ hostvars[groups['kvm'][0]]['OPENSHIFT_INSTALL_DIRECTORY'] }}/install-config.yaml"
+      register: install_config_content
+      delegate_to: "{{ groups['kvm'][0] }}"
+      when: RETRIEVE_FROM_VAULT is not defined or not (RETRIEVE_FROM_VAULT | bool)
+
+    - name: Copy install-config.yaml from KVM host to bastion (when not using vault)
+      copy:
+        dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
+        content: "{{ install_config_content.content | b64decode }}"
+        mode: '0644'
+      when: RETRIEVE_FROM_VAULT is not defined or not (RETRIEVE_FROM_VAULT | bool)
+
 
     - name: Decide Which Binary to install with
       ansible.builtin.set_fact:

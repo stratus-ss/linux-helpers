@@ -14,15 +14,26 @@ The templates directory has templates for VMs using legacy boot mode as opposed 
 > [!NOTE]
 > I am assuming hashicorp vault open source edition is available to store a versioned copy of the `install-config.yaml` so that you can reference it in the future.
 
+## Prerequisites
 
-## 🚀 Recent Improvements (Aug 2025)
+> 📋 **COMPREHENSIVE REQUIREMENTS**: See [**PREREQUISITES.md**](./PREREQUISITES.md) for complete infrastructure requirements, undocumented assumptions, and detailed setup instructions.
 
-- **🔧 Major Code Refactoring**: Eliminated 130+ lines of duplicate configuration through dynamic parameter generation
-- **📊 Flexible Configuration**: Support for multiple cluster configurations using Ansible extra-vars
-- **🎯 Examples Library**: Comprehensive configuration examples for different environments (prod, dev, edge)
-- **⚡ Performance Optimizations**: Consolidated vault operations and improved task efficiency
-- **🔒 Enhanced Security**: Better variable management and secrets handling
-- **🧪 Testing Framework**: Built-in demonstration and validation tools
+### Quick Overview
+- **KVM/libvirt host**: RHEL/CentOS/AlmaLinux/Rocky or similar distribution
+  - Use the [rhel_virtualization playbooks](https://github.com/stratus-ss/linux-helpers/tree/main/linux_installation/rhel_virtualization) to setup a virt host with nested virtualization
+- **Bastion host**: Separate host for running OpenShift installer (see [PREREQUISITES.md](./PREREQUISITES.md) for details)
+- **DNS server**: Currently supports pfSense only (automated DNS configuration)
+- **Ansible 2.9+** with required collections (see [requirements.yml](https://github.com/stratus-ss/linux-helpers/blob/main/requirements.yml))
+- **OpenShift pull secret**: Access to Red Hat container registries
+
+### Critical Dependencies Often Overlooked
+- **Bridge networks** must be pre-configured on KVM host
+- **Proxy configuration** is always generated (even if not needed)
+- **HashiCorp Vault** integration assumes specific paths and AppRole auth
+- **IP address planning** requires dedicated subnets without conflicts
+
+> ⚠️ **Important**: This automation makes several infrastructure assumptions that are not obvious from basic usage. **Review [PREREQUISITES.md](./PREREQUISITES.md) before deployment** to avoid common setup failures.
+
 
 ## Features
 
@@ -30,11 +41,9 @@ The templates directory has templates for VMs using legacy boot mode as opposed 
 - **Automated VM Provisioning**: Dynamic creation of OpenShift control plane and worker VMs on KVM/libvirt
 - **IP Management**: Automatic IP address assignment with configurable network ranges
 - **Dynamic Configuration**: Generate cluster parameters automatically based on node lists and network settings
-- **Multi-Environment Support**: Single playbook works for development, staging, and production clusters
 - **Variable Override System**: Flexible configuration using Ansible extra-vars
 - **Template-Based Deployment**: Jinja2 templates for VM XML, install-config, and services
 - **Modular Architecture**: Reusable roles for VM creation, network setup, DNS, and more
-- **Cluster Lifecycle Management**: Complete deployment and destruction workflows
 
 ### Advanced Integration
 - **HashiCorp Vault Integration**: Secure retrieval and storage of secrets (pull secrets, SSH keys, certificates)
@@ -47,7 +56,6 @@ The templates directory has templates for VMs using legacy boot mode as opposed 
 ```
 create_openshift_kvm/
 ├── README.md                              # This file
-├── REFACTORING_CHECKLIST.md              # Development and improvement tracking
 ├── vars.yaml                             # Default variable configuration
 ├── semaphore_create_kvm_openshift.yaml   # Main playbook (Semaphore UI compatible)
 ├── create_install_config.yaml            # Standalone install-config generator
@@ -83,27 +91,6 @@ create_openshift_kvm/
     └── semaphore_template_options.png
 ```
 
-## Prerequisites
-
-### Infrastructure Requirements
-- **KVM/libvirt host**: RHEL/CentOS/AlmaLinux/Rocky or similar distribution
-  - Use the [rhel_virtualization playbooks](https://github.com/stratus-ss/linux-helpers/tree/main/linux_installation/rhel_virtualization) to setup a virt host with nested virtualization
-- **Sufficient resources**: RAM and CPU to support your cluster size
-- **Network connectivity**: Access to OpenShift release images and container registries
-
-### Software Requirements
-- **Ansible 2.9+** with required collections:
-  - `community.libvirt`
-  - `community.hashi_vault`  
-  - `ansible.posix`
-  - See [requirements.yml](https://github.com/stratus-ss/linux-helpers/blob/main/requirements.yml) for complete list
-- **OpenShift pull secret**: Access to Red Hat container registries
-- **SSH key pair**: For cluster node access
-
-### Optional Components
-- **[HashiCorp Vault](https://github.com/hashicorp/vault)**: For enterprise secrets management
-- **DNS server**: Currently supports pfSense for automated DNS configuration
-- **Proxy server**: For environments requiring HTTP/HTTPS proxy access
 
 ## 🎯 Quick Start: Multiple Cluster Configurations
 
@@ -112,14 +99,6 @@ create_openshift_kvm/
 The `examples/` directory contains pre-configured templates for different environments:
 
 ```bash
-# Production cluster
-ansible-playbook semaphore_create_kvm_openshift.yaml \
-  --extra-vars @examples/production-cluster-override.yaml
-
-# Development cluster  
-ansible-playbook semaphore_create_kvm_openshift.yaml \
-  --extra-vars @examples/development-cluster-override.yaml
-
 # Edge computing cluster
 ansible-playbook semaphore_create_kvm_openshift.yaml \
   --extra-vars @examples/edge-cluster-override.json
@@ -148,7 +127,7 @@ ansible-playbook semaphore_create_kvm_openshift.yaml \
 
 ### How It Works
 
-The playbook now uses **dynamic parameter generation** instead of hardcoded configurations. This means:
+The playbook uses **dynamic parameter generation**. This means:
 
 - **Automatic IP assignment**: IPs are calculated based on `MACHINE_IP_BASE` and node indices
 - **Scalable node lists**: Add/remove nodes by updating `CONTROL_PLANE_NAMES` and `WORKER_NAMES`
@@ -256,60 +235,7 @@ Finally, I am using the `Key Store` in Semaphore to store the SSH key I will use
 
 ![semaphore_keystore.png](images/semaphore_keystore.png)
 
-## Advanced Usage
-
-### Custom Resource Profiles
-
-```bash
-# High-performance cluster
-ansible-playbook semaphore_create_kvm_openshift.yaml \
-  --extra-vars "VM_RAM_MB=65536" \
-  --extra-vars "VM_vCPUS=16"
-
-# Resource-constrained environment  
-ansible-playbook semaphore_create_kvm_openshift.yaml \
-  --extra-vars "VM_RAM_MB=8192" \
-  --extra-vars "VM_vCPUS=2"
-```
-
-### Network Configuration
-
-```bash
-# VLAN-enabled cluster
-ansible-playbook semaphore_create_kvm_openshift.yaml \
-  --extra-vars '{"VLANS": {"enabled": true, "machine_vlan_id": "100"}}'
-
-# Proxy environment
-ansible-playbook semaphore_create_kvm_openshift.yaml \
-  --extra-vars "HTTPS_PROXY=http://proxy.company.com:8080" \
-  --extra-vars "HTTP_PROXY=http://proxy.company.com:8080"
-```
-
-### Cluster Scaling
-
-```bash
-# Large production cluster
-ansible-playbook semaphore_create_kvm_openshift.yaml \
-  --extra-vars '{"WORKER_NAMES": ["worker1", "worker2", "worker3", "worker4", "worker5", "worker6"]}' \
-  --extra-vars "NUMBER_OF_WORKER_VMS=6"
-
-# Compact cluster (masters only)
-ansible-playbook semaphore_create_kvm_openshift.yaml \
-  --extra-vars "NUMBER_OF_WORKER_VMS=0"
-```
-
 ## Troubleshooting and Testing
-
-### Validate Configuration
-
-Use the demonstration playbook to test IP calculation and configuration:
-
-```bash
-cd examples/
-ansible-playbook demonstrate-ip-calculation.yaml \
-  --extra-vars "CLUSTER_NAME=test" \
-  --extra-vars "MACHINE_IP_BASE=10.20.30"
-```
 
 ### Common Issues
 
@@ -328,32 +254,6 @@ ansible-playbook semaphore_create_kvm_openshift.yaml \
   -vvv
 ```
 
-## Cluster Lifecycle Management
-
-### Deployment
-
-```bash
-# Full cluster deployment
-ansible-playbook semaphore_create_kvm_openshift.yaml \
-  --extra-vars @examples/production-cluster-override.yaml
-```
-
-### DNS Configuration
-
-```bash
-# Configure DNS entries (requires pfSense)
-ansible-playbook create_dns.yaml \
-  --extra-vars "create_dns=true"
-```
-
-### Cleanup and Destruction
-
-```bash
-# Destroy cluster and cleanup resources
-ansible-playbook destroy_cluster.yaml \
-  --extra-vars "destroy_cluster=true"
-```
-
 ## Security Considerations
 
 ### HashiCorp Vault Integration
@@ -365,22 +265,11 @@ This automation supports HashiCorp Vault for secure secrets management:
 - **Certificates**: Additional trust bundles and certificates
 - **Install config**: Versioned storage of cluster configuration
 
-### Best Practices
-
-1. **Use Vault**: Store sensitive information in HashiCorp Vault rather than plain text
-2. **Network segmentation**: Isolate cluster networks from production infrastructure
-3. **Access control**: Implement proper SSH key management and access controls
-4. **Regular updates**: Keep OpenShift versions and base images current
-
 ## Contributing and Development
-
-### Refactoring Status
-
-See [REFACTORING_CHECKLIST.md](REFACTORING_CHECKLIST.md) for ongoing improvement tracking and completed optimizations.
 
 ### Architecture Notes
 
-- **Legacy boot mode**: VMs use BIOS/legacy boot by default (configurable in `vm_template.xml.j2`)
+- **UEFI boot mode**: VMs use UEFI boot by default (configurable in `vm_template.xml.j2`)
 - **First interface assumption**: Playbook assumes `enp1s0` as primary interface (may be updated for predictive naming)
 - **pfSense DNS**: Currently only supports pfSense for automated DNS configuration
 - **Redfish emulation**: Uses sushy-tools for BMC functionality required by OpenShift baremetal installer
@@ -388,9 +277,7 @@ See [REFACTORING_CHECKLIST.md](REFACTORING_CHECKLIST.md) for ongoing improvement
 ### Future Enhancements
 
 - Support for additional DNS providers beyond pfSense
-- UEFI boot mode templates
 - Predictive network interface naming
-- Multi-cluster deployment coordination
 - Enhanced monitoring and logging integration
 
 ## License and Support
