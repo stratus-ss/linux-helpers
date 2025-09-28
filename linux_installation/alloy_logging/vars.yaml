@@ -1,0 +1,62 @@
+---
+# Grafana Alloy Configuration Variables
+# All configuration in one place for easy editing
+
+# ====== INSTALLATION PATHS ======
+alloy_path: "/root/"
+alloy_config_dir: "config"  
+alloy_binary: "bin/alloy"
+alloy_workdir: "/var/lib/alloy"
+alloy_metrics_port: 12345
+
+# ====== LOKI CONNECTION ======
+# UPDATE THESE for your environment
+loki_host: "loki.example.com" 
+loki_host_port: 3100
+
+# ====== LOG COLLECTION SETTINGS ======
+# Enable/disable specific log types
+host:
+  auth_log: true      # /var/log/auth.log
+  kernel_log: true    # /var/log/kern.log  
+  messages_log: true  # /var/log/messages
+  syslog_log: true    # /var/log/syslog
+  misc_log: true      # /var/log/*.log
+
+# ====== DNS LOGGING CONFIGURATION ======
+# Enable NetworkManager dnsmasq for DNS query logging
+log_dns: true
+
+# ====== ALLOY PERFORMANCE SETTINGS ======
+alloy_config_settings:
+  # Storage and retention
+  max_segment_age: "168h"  # 7 days
+  wal_enabled: true
+  drain_timeout: "2m"
+  
+  # Batch settings for Loki forwarding
+  batch_size: "2MiB"
+  batch_wait: "5s"
+  queue_capacity: "300MiB"
+  
+  # Retry configuration
+  max_backoff_period: "300s"
+  max_backoff_retries: 50
+  min_backoff_period: "1s"
+  remote_timeout: "30s"
+  
+  # Journal collection settings
+  journal_max_age: "720h"  # 30 days
+  journal_path: "/var/log/journal"
+
+# ====== ENVIRONMENT VARIABLES ======
+alloy_env_vars:
+  CUSTOM_ARGS: ""
+  RESTART_ON_UPGRADE: "true"
+
+# ====== LABELS FOR LOGS ======
+# These labels will be attached to all logs sent to Loki
+external_labels:
+  agent_version: "alloy"
+  deployment_type: "bare-metal"
+  environment: "production"  # Change as needed (dev, staging, prod)

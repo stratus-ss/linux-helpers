@@ -1,0 +1,177 @@
+// =============================================================================
+// ALLOY CONFIG WITH ALPHABETIZED ARGUMENTS AND ATTRIBUTES
+// =============================================================================
+
+// SECTION: ENHANCED SYSTEM LOGS & JOURNAL COLLECTION
+
+discovery.relabel "journal" {
+  rule {
+    source_labels = ["__journal__boot_id"]
+    target_label = "boot_id"
+  }
+  rule {
+    source_labels = ["__journal__comm"]
+    target_label = "command"
+  }
+  rule {
+    source_labels = ["__journal__pid"]
+    target_label = "pid"
+  }
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label = "level"
+  }
+  rule {
+    source_labels = ["__journal__realtime_timestamp"]
+    target_label = "journal_timestamp"
+  }
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label = "unit"
+  }
+  rule {
+    source_labels = ["__journal__transport"]
+    target_label = "transport"
+  }
+  targets = []
+}
+
+// File-based log collection, all attributes alphabetized
+local.file_match "system" {
+  path_targets = [
+{%if host.auth_log is defined %}
+  {
+      __address__ = "localhost",
+      __path__ = "/var/log/auth.log",
+      instance = constants.hostname,
+      job = string.format("%s-auth", constants.hostname),
+      log_type = "auth",
+    },
+{% endif %}
+{% if host.kernel_log is defined %}
+    {
+      __address__ = "localhost",
+      __path__ = "/var/log/kern.log",
+      instance = constants.hostname,
+      job = string.format("%s-kernel", constants.hostname),
+      log_type = "kernel",
+    },
+{% endif %}
+{% if host.messages_log is defined %}
+    {
+      __address__ = "localhost",
+      __path__ = "/var/log/messages",
+      instance = constants.hostname,
+      job = string.format("%s-messages", constants.hostname),
+      log_type = "messages",
+    },
+{% endif %}
+{% if host.syslog_log is defined %}
+    {
+      __address__ = "localhost",
+      __path__ = "/var/log/syslog",
+      instance = constants.hostname,
+      job = string.format("%s-syslog", constants.hostname),
+      log_type = "syslog",
+    },
+{% endif %}
+{% if host.misc_log is defined %}
+    {
+      __address__ = "localhost",
+      __path__ = "/var/log/*.log",
+      instance = constants.hostname,
+      job = string.format("%s-misc", constants.hostname),
+      log_type = "misc",
+    },
+{% endif %}
+  ]
+  sync_period = "30s"
+}
+
+// Journal configuration, attributes alphabetized
+loki.source.journal "journal" {
+  forward_to = [loki.write.default.receiver]
+  labels = {
+    component = string.format("%s-journal", constants.hostname),
+    source = "systemd-journal",
+  }
+  max_age = "{{ alloy_config_settings.journal_max_age }}"
+  path = "{{ alloy_config_settings.journal_path }}"
+  relabel_rules = discovery.relabel.journal.rules
+  // Optional: uncomment to filter by priority
+  // matches = "PRIORITY=0 PRIORITY=1 PRIORITY=2 PRIORITY=3"
+}
+
+// File source, attributes alphabetized
+loki.source.file "system" {
+  encoding = "utf-8"
+  forward_to = [loki.write.default.receiver]
+  targets = local.file_match.system.targets
+  tail_from_end = true
+}
+
+// Log processing: filter and drop rules alphabetized
+loki.process "log_filter" {
+  forward_to = [loki.write.default.receiver]
+  stage.drop {
+    drop_counter_reason = "cron_spam"
+    expression = ".*CRON.*"
+    source = ""
+  }
+  stage.drop {
+    drop_counter_reason = "session_spam"
+    expression = ".*systemd-logind.*Session.*logged out.*"
+    source = ""
+  }
+}
+
+// SECTION: LOKI WRITE WITH WAL BUFFERING, ARGUMENTS ALPHABETIZED
+loki.write "default" {
+  endpoint {
+    url = "{{ loki_endpoint }}"
+    batch_size = "{{ alloy_config_settings.batch_size }}"
+    batch_wait = "{{ alloy_config_settings.batch_wait }}"
+    max_backoff_period = "{{ alloy_config_settings.max_backoff_period }}"
+    max_backoff_retries = {{ alloy_config_settings.max_backoff_retries }}
+    min_backoff_period = "{{ alloy_config_settings.min_backoff_period }}"
+    queue_config {
+      capacity = "{{ alloy_config_settings.queue_capacity }}"
+      drain_timeout = "{{ alloy_config_settings.drain_timeout }}"
+    }
+    remote_timeout = "{{ alloy_config_settings.remote_timeout }}"
+    retry_on_http_429 = true
+  }
+  external_labels = {
+    agent_version = "{{ external_labels.agent_version }}",
+    deployment_type = "{{ external_labels.deployment_type }}",
+    environment = "{{ external_labels.environment }}",
+    hostname = constants.hostname,
+  }
+  wal {
+    drain_timeout = "{{ alloy_config_settings.drain_timeout }}"
+    enabled = {{ alloy_config_settings.wal_enabled | lower }}
+    max_read_frequency = "30s"
+    max_segment_age = "{{ alloy_config_settings.max_segment_age }}"
+    min_read_frequency = "1s"
+  }
+}
+
+// SECTION: ADDITIONAL COMPONENTS FOR MONITORING
+
+// Prometheus self-exporter, no attributes but alphabetically ordered section
+prometheus.exporter.self "alloy_metrics" {}
+
+// Connectivity check, all settings alphabetized
+prometheus.scrape "connectivity_check" {
+  forward_to = []
+  scrape_interval = "60s"
+  scrape_timeout = "10s"
+  targets = [
+    {
+
+      __address__ = "{{ loki_host }}:{{ loki_host_port }}",
+      __metrics_path__ = "/ready",
+      job = "loki-connectivity-check",
+    },
+  ]
+}

@@ -1,0 +1,70 @@
+# Download Alloy Binary
+# Determine the latest version of Alloy
+- name: Determine Latest Alloy Version
+  uri:
+    url: https://api.github.com/repos/grafana/alloy/releases/latest
+    method: GET
+    return_content: yes
+  register: github_release
+  changed_when: false
+
+# Set version from GitHub API response
+- name: Set Alloy Version
+  set_fact:
+    alloy_version: "{{ github_release.json.tag_name }}"
+
+# Determine the architecture of the target system
+- name: Determine System Architecture
+  command: uname -m
+  register: system_architecture
+  changed_when: false
+
+# Map architecture to Alloy naming convention
+- name: Map Architecture to Alloy Format
+  set_fact:
+    alloy_arch: "{{ 'amd64' if system_architecture.stdout == 'x86_64' else system_architecture.stdout }}"
+
+# Set the Alloy Download URL
+- name: Set Alloy Download URL
+  set_fact:
+    alloy_download_url: "https://github.com/grafana/alloy/releases/download/{{ alloy_version }}/alloy-linux-{{ alloy_arch }}.zip"
+
+# Download Alloy Binary
+- name: Download Alloy Binary
+  get_url:
+    url: "{{ alloy_download_url }}"
+    dest: "/tmp/alloy-linux-{{ alloy_arch }}.zip"
+    mode: '0644'
+
+# Create temporary extraction directory
+- name: Create temporary extraction directory
+  file:
+    path: "/tmp/alloy-extract"
+    state: directory
+    mode: '0755'
+
+# Extract Alloy Binary
+- name: Extract Alloy Binary
+  unarchive:
+    src: "/tmp/alloy-linux-{{ alloy_arch }}.zip"
+    dest: "/tmp/alloy-extract"
+    remote_src: yes
+
+# Place the binary in the correct location
+- name: Place Alloy Binary in {{ alloy_path }}/{{ alloy_binary }}
+  copy:
+    src: "/tmp/alloy-extract/alloy-linux-{{ alloy_arch }}/alloy"
+    dest: "{{ alloy_path }}/{{ alloy_binary }}"
+    mode: '0755'
+    remote_src: yes
+    owner: "root"
+    group: "root"
+
+# Clean up temporary files
+- name: Clean up temporary files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/alloy-linux-{{ alloy_arch }}.zip"
+    - "/tmp/alloy-extract"

@@ -1,0 +1,128 @@
+# Download Alloy Binary
+# Determine the latest version of Alloy
+- name: Determine Latest Alloy Version
+  uri:
+    url: https://api.github.com/repos/grafana/alloy/releases/latest
+    method: GET
+    return_content: yes
+  register: github_release
+  changed_when: false
+
+# Set version from GitHub API response
+- name: Set Alloy Version
+  set_fact:
+    alloy_version: "{{ github_release.json.tag_name }}"
+
+# Check if alloy binary already exists
+- name: Check if Alloy binary exists
+  stat:
+    path: "{{ alloy_path }}/{{ alloy_binary }}"
+  register: alloy_binary_stat
+
+# Get current version of installed alloy (if it exists)
+- name: Get current Alloy version
+  command: "{{ alloy_path }}/{{ alloy_binary }} -v"
+  register: current_alloy_version
+  changed_when: false
+  failed_when: false
+  when: alloy_binary_stat.stat.exists
+
+# Parse installed version from alloy -v output
+- name: Parse installed Alloy version
+  set_fact:
+    installed_version: "{{ current_alloy_version.stdout | regex_search('version (v[0-9]+\\.[0-9]+\\.[0-9]+)', '\\1') | first }}"
+  when: 
+    - alloy_binary_stat.stat.exists
+    - current_alloy_version.rc == 0
+
+# Set installed version to empty if binary doesn't exist or command failed
+- name: Set installed version to empty if not found
+  set_fact:
+    installed_version: ""
+  when: >
+    not alloy_binary_stat.stat.exists or
+    current_alloy_version.rc != 0
+
+# Check if versions match
+- name: Check if versions match
+  set_fact:
+    versions_match: "{{ installed_version == alloy_version }}"
+
+# Display version information
+- name: Display version comparison
+  debug:
+    msg: |
+      Target version: {{ alloy_version }}
+      Installed version: {{ installed_version | default('none') }}
+      Versions match: {{ versions_match }}
+      Will skip download: {{ versions_match }}
+
+# Determine the architecture of the target system (only if download needed)
+- name: Determine System Architecture
+  command: uname -m
+  register: system_architecture
+  changed_when: false
+  when: not versions_match
+
+# Map architecture to Alloy naming convention (only if download needed)
+- name: Map Architecture to Alloy Format
+  set_fact:
+    alloy_arch: "{{ 'amd64' if system_architecture.stdout == 'x86_64' else system_architecture.stdout }}"
+  when: not versions_match
+
+# Set the Alloy Download URL (only if download needed)
+- name: Set Alloy Download URL
+  set_fact:
+    alloy_download_url: "https://github.com/grafana/alloy/releases/download/{{ alloy_version }}/alloy-linux-{{ alloy_arch }}.zip"
+  when: not versions_match
+
+# Download Alloy Binary (only if versions don't match)
+- name: Download Alloy Binary
+  get_url:
+    url: "{{ alloy_download_url }}"
+    dest: "/tmp/alloy-linux-{{ alloy_arch }}.zip"
+    mode: '0644'
+  when: not versions_match
+
+# Create temporary extraction directory (only if downloading)
+- name: Create temporary extraction directory
+  file:
+    path: "/tmp/alloy-extract"
+    state: directory
+    mode: '0755'
+  when: not versions_match
+
+# Extract Alloy Binary (only if downloading)
+- name: Extract Alloy Binary
+  unarchive:
+    src: "/tmp/alloy-linux-{{ alloy_arch }}.zip"
+    dest: "/tmp/alloy-extract"
+    remote_src: yes
+  when: not versions_match
+
+# Place the binary in the correct location (only if downloading)
+- name: Place Alloy Binary in {{ alloy_path }}/{{ alloy_binary }}
+  copy:
+    src: "/tmp/alloy-extract/alloy-linux-{{ alloy_arch }}"
+    dest: "{{ alloy_path }}/{{ alloy_binary }}"
+    mode: '0755'
+    remote_src: yes
+    owner: "root"
+    group: "root"
+  when: not versions_match
+
+# Clean up temporary files (only if we downloaded)
+- name: Clean up temporary files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/alloy-linux-{{ alloy_arch }}.zip"
+    - "/tmp/alloy-extract"
+  when: not versions_match
+
+# Display skip message when versions match
+- name: Skip download - correct version already installed
+  debug:
+    msg: "Skipping download: Alloy {{ installed_version }} is already installed and matches target {{ alloy_version }}"
+  when: versions_match

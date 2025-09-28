@@ -1,0 +1,33 @@
+# Configure Alloy
+
+# Create alloy.env template
+- name: Create alloy.env template
+  ansible.builtin.template:
+    src: alloy.env.j2
+    dest: "{{ alloy_path }}/{{ alloy_config_dir }}/alloy.env"
+    mode: '0644'
+
+# Create alloy.config template
+- name: Create alloy.config template
+  ansible.builtin.template: 
+    src: alloy.config.j2
+    dest: "{{ alloy_path }}/{{ alloy_config_dir }}/alloy.config"
+    mode: '0644'
+
+# Create alloy.service template
+- name: Create alloy.service template
+  ansible.builtin.template:
+    src: alloy.service.j2
+    dest: "{{ alloy_path }}/{{ alloy_config_dir }}/alloy.service"
+    mode: '0644'
+
+# daemon-reload
+- name: Daemon reload
+  ansible.builtin.command: systemctl daemon-reload
+
+# Enable and start alloy.service
+- name: Enable and start alloy.service
+  ansible.builtin.systemd:
+    name: alloy.service
+    enabled: yes
+    state: started
