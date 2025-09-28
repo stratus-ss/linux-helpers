@@ -16,7 +16,7 @@
     "misc_log": true
   },
   
-  "log_dns": false,
+  "log_dns": true,
   
   "alloy_config_settings": {
     "max_segment_age": "168h",

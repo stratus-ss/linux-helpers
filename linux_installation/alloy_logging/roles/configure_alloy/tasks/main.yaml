@@ -21,6 +21,18 @@
     dest: "{{ alloy_path }}/{{ alloy_config_dir }}/alloy.service"
     mode: '0644'
 
+- name: Copy alloy.service to systemd
+  copy:
+    src: "{{ alloy_path }}/{{ alloy_config_dir }}/alloy.service"
+    dest: /etc/systemd/system/alloy.service
+    remote_src: yes
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart alloy
+    
 # daemon-reload
 - name: Daemon reload
   ansible.builtin.command: systemctl daemon-reload
@@ -30,4 +42,4 @@
   ansible.builtin.systemd:
     name: alloy.service
     enabled: yes
-    state: started
+    state: restarted

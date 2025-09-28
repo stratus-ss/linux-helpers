@@ -54,26 +54,7 @@
         - dns
         - networkmanager
   
-  post_tasks:
-    - name: Copy alloy.service to systemd
-      copy:
-        src: "{{ alloy_path }}/{{ alloy_config_dir }}/alloy.service"
-        dest: /etc/systemd/system/alloy.service
-        remote_src: yes
-        owner: root
-        group: root
-        mode: '0644'
-      notify:
-        - reload systemd
-        - restart alloy
-    
-    - name: Ensure alloy service is enabled and running
-      systemd:
-        name: alloy
-        enabled: yes
-        state: started
-        daemon_reload: yes
-    
+  post_tasks:  
     - name: Wait for alloy service to be ready
       uri:
         url: "http://localhost:{{ alloy_metrics_port | default('12345') }}/ready"
