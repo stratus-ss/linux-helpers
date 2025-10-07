@@ -1,0 +1,37 @@
+# Development Cluster Override Variables  
+# Usage: ansible-playbook semaphore_create_kvm_openshift.yaml --extra-vars @examples/development-cluster-override.yaml
+
+# Cluster Identity
+CLUSTER_NAME: "dev"
+BASE_DOMAIN: "dev.lab.local"
+
+# Network Configuration - Development subnet
+MACHINE_IP_BASE: "192.168.200"
+MACHINE_IP_START: 20
+API_VIP: "192.168.200.10"
+APPS_VIP: "192.168.200.11" 
+NETWORK_GATEWAY: "192.168.200.1"
+DNS_NAMESERVER: "192.168.200.1"
+MACHINE_NETWORK: "192.168.200.0/24"
+NETWORK_CIDR: 24
+
+# Node Configuration - Development naming (smaller cluster)
+CONTROL_PLANE_NAMES:
+  - "dev-cp1"
+  - "dev-cp2" 
+  - "dev-cp3"
+
+# No workers for dev cluster
+NUMBER_OF_WORKER_VMS: 0
+
+# Development Resources (lighter)
+VM_RAM_MB: 16384  # 16GB for development
+VM_vCPUS: 4       # 4 vCPUs for development
+
+# No proxy for development
+HTTPS_PROXY: ""
+HTTP_PROXY: ""
+NO_PROXY: "localhost,127.0.0.1"
+
+# Use latest version for development testing
+OPENSHIFT_VERSION: "4.18.1"

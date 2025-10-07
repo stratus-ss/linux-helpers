@@ -22,6 +22,7 @@ The templates directory has templates for VMs using legacy boot mode as opposed 
 - **KVM/libvirt host**: RHEL/CentOS/AlmaLinux/Rocky or similar distribution
   - Use the [rhel_virtualization playbooks](https://github.com/stratus-ss/linux-helpers/tree/main/linux_installation/rhel_virtualization) to setup a virt host with nested virtualization
 - **Bastion host**: Separate host for running OpenShift installer (see [PREREQUISITES.md](./PREREQUISITES.md) for details)
+  > **Note**: The bastion host is **not created** by this playbook - it is expected to already exist and be accessible
 - **DNS server**: Currently supports pfSense only (automated DNS configuration)
 - **Ansible 2.9+** with required collections (see [requirements.yml](https://github.com/stratus-ss/linux-helpers/blob/main/requirements.yml))
 - **OpenShift pull secret**: Access to Red Hat container registries
@@ -50,6 +51,19 @@ The templates directory has templates for VMs using legacy boot mode as opposed 
 - **DNS Automation**: Optional DNS configuration for OpenShift endpoints (currently supporting pfSense)
 - **Binary Management**: Automated download and installation of correct OpenShift binaries
 - **Redfish Support**: Virtual media provisioning via sushy-tools for baremetal-style deployment
+- **Selective Deployment Control**: Skip VM creation, bastion setup, or binary downloads with configuration flags
+- **Network Information Gathering**: Separate role for collecting VM network details without VM creation
+- **Improved JSON Handling**: Proper PULL_SECRET formatting for both vault and direct configurations
+- **Standalone Operations**: Separate playbooks for DNS configuration and install-config generation
+
+### Recent Updates ✨
+
+- **Enhanced Storage Configuration**: Support for separate storage pools, paths, and disk sizes for control plane vs worker nodes
+- **Utility Scripts**: Added `convert_vars.py` for YAML/JSON conversion (useful for Semaphore integration)
+- **Performance Optimization**: Replaced slow `ansible.builtin.stat` with fast shell commands in VM creation
+- **Modular Architecture**: Split VM creation and network gathering into separate roles for flexibility
+- **Configuration Flexibility**: Added `SKIP_BASTION_SETUP` and `SKIP_VM_CREATION` flags for selective deployment
+- **Bug Fixes**: Resolved PULL_SECRET JSON double-encoding issue when bypassing vault
 
 ## Directory Structure
 
@@ -71,6 +85,7 @@ create_openshift_kvm/
 │   └── demonstrate-ip-calculation.yaml   # IP calculation demo
 ├── roles/                                # Ansible roles
 │   ├── create_kvm_guest/                 # VM creation and management
+│   ├── gather_vm_network_info/           # 🆕 VM network information collection
 │   ├── get_network_interfaces/           # Network interface detection
 │   ├── vault_read_storage/               # HashiCorp Vault operations
 │   ├── vault_write_storage/              # Vault data storage
@@ -123,6 +138,113 @@ ansible-playbook semaphore_create_kvm_openshift.yaml \
    ansible-playbook -i inventory semaphore_create_kvm_openshift.yaml
    ```
 
+## ⚙️ Advanced Configuration Options
+
+### Selective Deployment Control
+
+The automation now supports modular deployment control through configuration flags, allowing you to skip specific phases of the deployment process:
+
+#### Skip Bastion Setup (`SKIP_BASTION_SETUP`)
+
+Skip bastion host configuration and OpenShift binary downloads when they're already configured:
+
+```bash
+# Skip bastion setup when bastion is pre-configured
+ansible-playbook semaphore_create_kvm_openshift.yaml \
+  --extra-vars "SKIP_BASTION_SETUP=true"
+```
+
+**What gets skipped:**
+- `bastion_libvirt` role execution
+- `download_ocp_binaries` role execution
+- Bastion host KVM setup
+
+**Use cases:**
+- Bastion host already configured with required binaries
+- Re-running deployments after bastion setup
+- Troubleshooting deployments without re-downloading binaries
+
+#### Skip VM Creation (`SKIP_VM_CREATION`)
+
+Skip VM creation while still collecting network information from existing VMs:
+
+```bash
+# Gather network info from existing VMs without creating new ones
+ansible-playbook semaphore_create_kvm_openshift.yaml \
+  --extra-vars "SKIP_VM_CREATION=true"
+```
+
+**What happens:**
+- ✅ VM network information collection (`gather_vm_network_info` role)
+- ✅ MAC address and interface fact gathering
+- ❌ VM creation (`create_kvm_guest` role skipped)
+- ❌ Disk image creation
+
+**Use cases:**
+- VMs already exist from previous runs
+- Network troubleshooting and information gathering
+- Updating deployment configurations for existing infrastructure
+- Split deployment workflows (create VMs separately, then deploy OpenShift)
+
+#### Combined Usage
+
+```bash
+# Skip both VM creation and bastion setup (info gathering only)
+ansible-playbook semaphore_create_kvm_openshift.yaml \
+  --extra-vars "SKIP_VM_CREATION=true" \
+  --extra-vars "SKIP_BASTION_SETUP=true"
+```
+
+### Modular Role Architecture
+
+The automation uses a modular role design:
+
+- **`create_kvm_guest`**: VM creation, disk management, libvirt configuration
+- **`gather_vm_network_info`**: Network interface collection and MAC address gathering (independent of VM creation)
+- **`bastion_libvirt`**: Bastion host KVM setup
+- **`download_ocp_binaries`**: OpenShift binary downloading and installation
+
+This separation allows for flexible deployment scenarios and easier troubleshooting.
+
+### 🗄️ Enhanced Storage Configuration
+
+The automation now supports separate storage configurations for control plane and worker nodes:
+
+#### Unified Storage (Default Behavior)
+```yaml
+LIBVIRT_POOL_NAME: "default"
+LIBVIRT_DISK_PATH: "/var/lib/libvirt"
+LIBVIRT_DISK_SIZE: 120
+# Workers inherit control plane settings
+```
+
+#### Separate Storage Pools
+```yaml
+# Control plane on NVMe storage
+LIBVIRT_POOL_NAME: "nvme-pool"
+LIBVIRT_DISK_PATH: "/var/lib/libvirt_nvme"
+LIBVIRT_DISK_SIZE: 200
+
+# Workers on SSD storage
+WORKER_LIBVIRT_POOL_NAME: "ssd-pool"
+WORKER_LIBVIRT_DISK_PATH: "/mnt/ssd-storage/libvirt_ssd"
+WORKER_LIBVIRT_DISK_SIZE: 300
+```
+
+#### Mixed Configurations
+```bash
+# Same pool, different disk sizes
+ansible-playbook semaphore_create_kvm_openshift.yaml \
+  --extra-vars "LIBVIRT_POOL_NAME=vm-pool" \
+  --extra-vars "LIBVIRT_DISK_SIZE=150" \
+  --extra-vars "WORKER_LIBVIRT_DISK_SIZE=500"
+```
+
+**Benefits:**
+- **Performance Optimization**: Place control plane on faster storage (NVMe) and workers on larger, slower storage
+- **Cost Management**: Use expensive fast storage only where needed
+- **Flexibility**: Mix and match storage types based on workload requirements
+
 ## 🔧 Dynamic Configuration System
 
 ### How It Works
@@ -145,7 +267,15 @@ The playbook uses **dynamic parameter generation**. This means:
 | `CONTROL_PLANE_NAMES` | Master node names | `["prod-cp1", "prod-cp2", "prod-cp3"]` |
 | `WORKER_NAMES` | Worker node names | `["prod-worker1", "prod-worker2"]` |
 | `API_VIP` | API load balancer IP | `"10.50.100.5"` |
-| `APP_VIP` | Apps load balancer IP | `"10.50.100.6"` |
+| `APPS_VIP` | Apps load balancer IP | `"10.50.100.6"` |
+| `SKIP_BASTION_SETUP` | Skip bastion and binary setup | `false` |
+| `SKIP_VM_CREATION` | Skip VM creation (info gathering only) | `false` |
+| `LIBVIRT_POOL_NAME` | Control plane storage pool | `"default"` |
+| `LIBVIRT_DISK_PATH` | Control plane storage path | `"/var/lib/libvirt"` |
+| `LIBVIRT_DISK_SIZE` | Control plane disk size (GB) | `120` |
+| `WORKER_LIBVIRT_POOL_NAME` | Worker storage pool (optional) | `LIBVIRT_POOL_NAME` |
+| `WORKER_LIBVIRT_DISK_PATH` | Worker storage path (optional) | `LIBVIRT_DISK_PATH` |
+| `WORKER_LIBVIRT_DISK_SIZE` | Worker disk size (GB, optional) | `LIBVIRT_DISK_SIZE` |
 
 ### Example: IP Calculation
 
@@ -222,7 +352,11 @@ bastion.example.com
 | `NETWORK_GATEWAY` | String | Network gateway for cluster |
 | `OPENSHIFT_VERSION`| String | The version of OCP to install (i.e. `4.18.14`)|
 | `RETRIEVE_FROM_VAULT` | String | Enable Vault integration (`true`/`false`) |
+| `SKIP_BASTION_SETUP` | String | Skip bastion setup (`true`/`false`) |
+| `SKIP_VM_CREATION` | String | Skip VM creation (`true`/`false`) |
 | `SUSHY_SERVER` | String | Redfish BMC emulation server IP |
+| `LIBVIRT_POOL_NAME` | String | Control plane storage pool name |
+| `WORKER_LIBVIRT_POOL_NAME` | String | Worker storage pool name (optional) |
 
 
 I am using "Survey" variables in order to override values coded into the playbook. My Template looks like this (all survey variables are marked as required):
@@ -243,6 +377,9 @@ Finally, I am using the `Key Store` in Semaphore to store the SSH key I will use
 2. **Resource constraints**: Verify KVM host has sufficient RAM/CPU for cluster size
 3. **Network connectivity**: Check access to OpenShift registries and proxy settings
 4. **Vault connectivity**: Validate HashiCorp Vault credentials and network access
+5. **PULL_SECRET formatting**: When bypassing vault (`RETRIEVE_FROM_VAULT=false`), ensure pull secret is properly formatted JSON string
+6. **Storage configuration**: Ensure storage pools exist on KVM host before deployment
+7. **DNS entries**: Existing DNS entries may conflict
 
 ### Debug Mode
 

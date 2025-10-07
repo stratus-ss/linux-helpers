@@ -1,0 +1,36 @@
+{
+  "CLUSTER_NAME": "edge",
+  "BASE_DOMAIN": "edge.datacenter.local",
+  "MACHINE_IP_BASE": "10.100.50",
+  "MACHINE_IP_START": 100,
+  "API_VIP": "10.100.50.90",
+  "APPS_VIP": "10.100.50.91",
+  "NETWORK_GATEWAY": "10.100.50.1",
+  "DNS_NAMESERVER": "10.100.50.2",
+  "MACHINE_NETWORK": "10.100.50.0/24",
+  "NETWORK_CIDR": 24,
+  
+  "CONTROL_PLANE_NAMES": [
+    "edge-control-01",
+    "edge-control-02", 
+    "edge-control-03"
+  ],
+  
+  "WORKER_NAMES": [
+    "edge-compute-01",
+    "edge-compute-02"
+  ],
+  
+  "NUMBER_OF_WORKER_VMS": 2,
+  
+  "VM_RAM_MB": 24576,
+  "VM_vCPUS": 6,
+  
+  "OPENSHIFT_VERSION": "4.17.11",
+  
+  "HTTPS_PROXY": "",
+  "HTTP_PROXY": "",
+  "NO_PROXY": "localhost,127.0.0.1,edge.datacenter.local",
+  
+  "COMMENT": "This will generate IPs: edge-control-01: 10.100.50.100, edge-control-02: 10.100.50.101, edge-control-03: 10.100.50.102, edge-compute-01: 10.100.50.103, edge-compute-02: 10.100.50.104"
+}

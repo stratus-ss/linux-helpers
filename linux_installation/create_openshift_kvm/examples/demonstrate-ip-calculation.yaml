@@ -1,0 +1,65 @@
+---
+# Quick demonstration of how IP calculation works with different overrides
+- name: Demonstrate Dynamic IP Calculation
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # Default values (like in your vars.yaml)
+    CLUSTER_NAME: "default"
+    BASE_DOMAIN: "ocp4.example.com"
+    MACHINE_IP_BASE: "192.168.95"
+    MACHINE_IP_START: 1
+    CONTROL_PLANE_NAMES:
+      - "ocp-control1"
+      - "ocp-control2" 
+      - "ocp-control3"
+    WORKER_NAMES:
+      - "ocp-worker1"
+      - "ocp-worker2"
+    NUMBER_OF_MASTER_VMS: 3
+    NUMBER_OF_WORKER_VMS: 2
+
+  tasks:
+    - name: Show current configuration
+      debug:
+        msg: |
+          Current Configuration:
+          =====================
+          CLUSTER_NAME: {{ CLUSTER_NAME }}
+          BASE_DOMAIN: {{ BASE_DOMAIN }}
+          MACHINE_IP_BASE: {{ MACHINE_IP_BASE }}
+          MACHINE_IP_START: {{ MACHINE_IP_START }}
+          Control Plane Nodes: {{ CONTROL_PLANE_NAMES | length }}
+          Worker Nodes: {{ NUMBER_OF_WORKER_VMS }}
+
+    - name: Generate control plane IPs
+      debug:
+        msg: "{{ item.1 }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} -> {{ MACHINE_IP_BASE }}.{{ (MACHINE_IP_START + item.0) | string }}"
+      loop: "{{ CONTROL_PLANE_NAMES | enumerate }}"
+      loop_control:
+        label: "Control Plane {{ item.0 + 1 }}"
+
+    - name: Generate worker IPs (if any)
+      debug:
+        msg: "{{ item.1 }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} -> {{ MACHINE_IP_BASE }}.{{ (MACHINE_IP_START + NUMBER_OF_MASTER_VMS + item.0) | string }}"
+      loop: "{{ WORKER_NAMES | enumerate }}"
+      loop_control:
+        label: "Worker {{ item.0 + 1 }}"
+      when: NUMBER_OF_WORKER_VMS > 0
+
+    - name: Show override examples
+      debug:
+        msg: |
+          To create different clusters, use extra-vars:
+          
+          Production Example:
+          ansible-playbook this-playbook.yaml \
+            --extra-vars "CLUSTER_NAME=prod" \
+            --extra-vars "BASE_DOMAIN=prod.mycompany.com" \
+            --extra-vars "MACHINE_IP_BASE=10.50.100" \
+            --extra-vars "MACHINE_IP_START=10"
+          
+          Would generate:
+          prod-control1.prod.prod.mycompany.com -> 10.50.100.10
+          prod-control2.prod.prod.mycompany.com -> 10.50.100.11
+          prod-control3.prod.prod.mycompany.com -> 10.50.100.12

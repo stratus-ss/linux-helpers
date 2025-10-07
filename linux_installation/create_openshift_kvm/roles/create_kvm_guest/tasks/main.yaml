@@ -1,8 +1,13 @@
 ---
-- name: Check if qcow2 disk image already exists
-  ansible.builtin.stat:
-    path: "{{ vm_libvirt_disk_path }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2"
-  register: disk_image_stat
+- name: Check if qcow2 disk image already exists (fast)
+  ansible.builtin.shell: |
+    test -f "{{ vm_libvirt_disk_path }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2" && echo "true" || echo "false"
+  register: disk_image_check
+  changed_when: false
+
+- name: Set disk image exists fact
+  ansible.builtin.set_fact:
+    disk_image_exists: "{{ disk_image_check.stdout | bool }}"
 
 - name: Check if VM is already defined
   community.libvirt.virt:
@@ -34,7 +39,7 @@
   ansible.builtin.debug:
     msg: >
       {{ node_type | title }} node disk image {{ vm_libvirt_disk_path }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2 
-      {% if disk_image_stat.stat.exists %}already exists, skipping creation{% else %}does not exist, will create{% endif %}
+      {% if disk_image_exists %}already exists, skipping creation{% else %}does not exist, will create{% endif %}
       (using {{ node_type }} storage pool: {{ vm_libvirt_pool_name }})
 
 - name: Create the disk image file ({{ vm_libvirt_disk_size }}GB) for {{ node_type }} node
@@ -42,7 +47,7 @@
     qemu-img create -f qcow2 
     {{ vm_libvirt_disk_path }}/{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}.qcow2 
     {{ vm_libvirt_disk_size }}G
-  when: not disk_image_stat.stat.exists
+  when: not disk_image_exists
   register: qemu_img_result
 
 - name: Set proper permissions on disk image
@@ -53,25 +58,14 @@
     mode: '0660'
   # Always ensure correct permissions, whether file is new or existing
 
-- name: Register VM info (for both new and existing VMs)
-  community.libvirt.virt:
-    command: get_interfaces
-    name: "{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
-  register: vminfo
-
 - name: Refresh the storage pool
   community.libvirt.virt_pool:
     command: refresh
     name: "{{ vm_libvirt_pool_name }}"
-  when: not disk_image_stat.stat.exists
-
-- name: Set interface and mac address facts for vm
-  ansible.builtin.set_fact:
-    "{{ vm_name | replace('-','_') }}_interfaces": "{{ vminfo.network_interfaces }}"
+  when: not disk_image_exists
 
 - name: Verify VM creation completed successfully
   ansible.builtin.debug:
     msg: >
       VM {{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 
       {% if vm_status is failed %}has been created and defined successfully{% else %}was already defined, skipped creation{% endif %}.
-      MAC address: {{ vminfo.network_interfaces[vminfo.network_interfaces.keys()|list|first].mac if vminfo.network_interfaces else 'Not available' }}

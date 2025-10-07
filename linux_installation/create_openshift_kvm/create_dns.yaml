@@ -1,0 +1,12 @@
+- name: Configure DNS
+  hosts: dns
+  gather_facts: false
+  vars_files:
+    vars.yaml
+  vars:
+    create_dns: true
+  tasks:
+    - name: Creating DNS Entries...
+      ansible.builtin.include_role:
+        name: dns_settings_pfsense
+      when: create_dns| default(false)|bool

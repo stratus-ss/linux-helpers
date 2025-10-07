@@ -1,17 +1,30 @@
 ---
+- name: Debug DNS play execution
+  debug:
+    msg:
+      - "DNS play is executing"
+      - "create_dns value: {{ create_dns | default('undefined') }}"
+      - "KVM groups available: {{ groups['kvm'] | default([]) }}"
+      - "OPENSHIFT_CLUSTER_PROVISION_PARAMS: {{ OPENSHIFT_CLUSTER_PROVISION_PARAMS | default('undefined') }}"
+      - "CLUSTER_NAME: {{ CLUSTER_NAME | default('undefined') }}"
+      - "BASE_DOMAIN: {{ BASE_DOMAIN | default('undefined') }}"
+      - "API_VIP: {{ API_VIP | default('undefined') }}"
+      - "APPS_VIP: {{ APPS_VIP | default('undefined') }}"
+      - "BOOTSTRAP_STATIC_IP: {{ BOOTSTRAP_STATIC_IP | default('undefined') }}"
+  when: DEBUG is defined and DEBUG | bool
+
 - name: Create DNS for Bootstrap
   pfsensible.core.pfsense_dns_resolver:
     state: present
-    preserve: true
     hosts:
       - host: "bootstrap"
         domain: "{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
         ip: "{{ BOOTSTRAP_STATIC_IP }}"
         descr: "OCP bootstrap node"
+    domain_overrides: []
 
 - name: Create DNS entry for OCP hosts
   pfsensible.core.pfsense_dns_resolver:
-    preserve: true
     state: present
     hosts:
       - host: "{{ item.openshift_node_shortname }}"
@@ -23,17 +36,15 @@
 - name: Add zone redirects for the api & apps
   pfsensible.core.pfsense_dns_resolver:
     state: present
-    preserve: true
     custom_options: |
       local-zone: "api.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}" redirect
       local-data: "api.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 86400 IN A {{ API_VIP }}"
       local-zone: "apps.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}" redirect
-      local-data: "apps.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 86400 IN A {{ APP_VIP }}"
+      local-data: "apps.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 86400 IN A {{ APPS_VIP }}"
 
 - name: add domain overrides
   pfsensible.core.pfsense_dns_resolver:
     state: present
-    preserve: true
     domainoverrides:
       - domain: "newyorktimes.com"
         descr: "no more newyorktimes"

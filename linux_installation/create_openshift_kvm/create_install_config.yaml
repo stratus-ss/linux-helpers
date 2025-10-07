@@ -1,0 +1,15 @@
+---
+- name: Create VM on KVM Host
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - vars.yaml
+  vars:
+    install_libvirt: true
+    install_sushy: false
+  tasks:
+    - name: Generate cluster-config.yaml
+      ansible.builtin.template:
+        src: install-config.yaml.j2
+        dest: "/tmp/install-config.yaml"
+      delegate_to: localhost

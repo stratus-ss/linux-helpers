@@ -1,0 +1,42 @@
+# Production Cluster Override Variables
+# Usage: ansible-playbook semaphore_create_kvm_openshift.yaml --extra-vars @examples/production-cluster-override.yaml
+
+# Cluster Identity
+CLUSTER_NAME: "production"
+BASE_DOMAIN: "prod.mycompany.com"
+
+# Network Configuration - Production subnet
+MACHINE_IP_BASE: "10.50.100"
+MACHINE_IP_START: 10
+API_VIP: "10.50.100.5"
+APPS_VIP: "10.50.100.6"
+NETWORK_GATEWAY: "10.50.100.1"
+DNS_NAMESERVER: "10.50.100.2"
+MACHINE_NETWORK: "10.50.100.0/24"
+NETWORK_CIDR: 24
+
+# Node Configuration - Production naming
+CONTROL_PLANE_NAMES:
+  - "prod-master-01"
+  - "prod-master-02" 
+  - "prod-master-03"
+
+WORKER_NAMES:
+  - "prod-worker-01"
+  - "prod-worker-02"
+  - "prod-worker-03"
+  - "prod-worker-04"
+
+NUMBER_OF_WORKER_VMS: 4
+
+# Production Resources
+VM_RAM_MB: 32768  # 32GB for production
+VM_vCPUS: 8       # 8 vCPUs for production
+
+# Production Proxy Settings
+HTTPS_PROXY: "http://prod-proxy.mycompany.com:8080"
+HTTP_PROXY: "http://prod-proxy.mycompany.com:8080"
+NO_PROXY: "localhost,127.0.0.1,api.openshift.com,mycompany.com,.prod.mycompany.com"
+
+# OpenShift Version
+OPENSHIFT_VERSION: "4.17.15"  # Latest stable for production

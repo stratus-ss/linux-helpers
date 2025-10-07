@@ -12,11 +12,12 @@
       set_fact:
         ADDITIONAL_TRUST_BUNDLE: "{{ ADDITIONAL_TRUST_BUNDLE | default(false) }}"
         API_VIP: "{{ API_VIP | default('') }}" 
-        APP_VIP: "{{ APP_VIP | default('') }}"
+        APPS_VIP: "{{ APPS_VIP | default('') }}"
         BASE_DOMAIN: "{{ BASE_DOMAIN | default('') }}"
         BOOTSTRAP_STATIC_IP: "{{ BOOTSTRAP_STATIC_IP | default('') }}"
         BOOTSTRAP_GW: "{{ BOOTSTRAP_GW | default('') }}"
         BOOTSTRAP_DNS: "{{ BOOTSTRAP_DNS | default('') }}"
+        CREATE_DNS: "{{ CREATE_DNS | default(false) }}"
         CLUSTER_NAME: "{{ CLUSTER_NAME | default('') }}"
         CLUSTER_NETWORK: 172.30.0.0/16
         DNS_NAMESERVER: "{{ DNS_NAMESERVER | default('') }}"
@@ -67,6 +68,19 @@
         # IP address base for machine network - will be incremented for each node
         MACHINE_IP_BASE: "{{ MACHINE_IP_BASE | default('') }}"
         MACHINE_IP_START: "{{ MACHINE_IP_START | default(1) }}"
+      
+        RETRIEVE_FROM_VAULT: "{{ RETRIEVE_FROM_VAULT | default(false) }}"
+        SKIP_BASTION_SETUP: "{{ SKIP_BASTION_SETUP | default(false) }}"
+        SKIP_VM_CREATION: "{{ SKIP_VM_CREATION | default(false) }}"
+
+    - name: Debug KVM host facts that will be shared with other plays
+      debug:
+        msg:
+          - "CLUSTER_NAME: {{ CLUSTER_NAME }}"
+          - "BASE_DOMAIN: {{ BASE_DOMAIN }}"
+          - "RETRIEVE_FROM_VAULT: {{ RETRIEVE_FROM_VAULT }}"
+          - "OPENSHIFT_INSTALL_DIRECTORY: {{ OPENSHIFT_INSTALL_DIRECTORY }}"
+      when: DEBUG is defined and DEBUG | bool
 
     # Refactoring assisted by Cursor ussing Claude 4 Sonnet
     - name: Generate control plane node parameters
@@ -194,7 +208,9 @@
           loop: "{{ CONTROL_PLANE_NAMES }}"
           loop_control:
             loop_var: vm_name
-          when: vm_name not in existing_vms.list_vms
+          when: 
+            - not (SKIP_VM_CREATION | default(false) | bool)
+            - vm_name not in existing_vms.list_vms
 
         - name: Create Worker Plane VMs
           ansible.builtin.include_role:
@@ -208,7 +224,28 @@
           loop_control:
             loop_var: vm_name
           when: 
+            - not (SKIP_VM_CREATION | default(false) | bool)
             - vm_name not in existing_vms.list_vms 
+            - WORKER_NAMES is defined 
+            - NUMBER_OF_WORKER_VMS !=0
+      when: install_libvirt| default(false) | bool
+
+    - name: Gather VM Network Information
+      block:
+        - name: Collect Control Plane VM Network Info
+          ansible.builtin.include_role:
+            name: gather_vm_network_info
+          loop: "{{ CONTROL_PLANE_NAMES }}"
+          loop_control:
+            loop_var: vm_name
+
+        - name: Collect Worker VM Network Info
+          ansible.builtin.include_role:
+            name: gather_vm_network_info
+          loop: "{{ WORKER_NAMES }}"
+          loop_control:
+            loop_var: vm_name
+          when: 
             - WORKER_NAMES is defined 
             - NUMBER_OF_WORKER_VMS !=0
       when: install_libvirt| default(false) | bool
@@ -289,7 +326,7 @@
         CLUSTER_NAME: "{{ hostvars[groups['kvm'][0]]['CLUSTER_NAME'] }}"
         BASE_DOMAIN: "{{ hostvars[groups['kvm'][0]]['BASE_DOMAIN'] }}"
         API_VIP: "{{ hostvars[groups['kvm'][0]]['API_VIP'] }}"
-        APP_VIP: "{{ hostvars[groups['kvm'][0]]['APP_VIP'] }}"
+        APPS_VIP: "{{ hostvars[groups['kvm'][0]]['APPS_VIP'] }}"
         BOOTSTRAP_STATIC_IP: "{{ hostvars[groups['kvm'][0]]['BOOTSTRAP_STATIC_IP'] }}"
       when: create_dns| default(false)|bool
 
@@ -302,6 +339,23 @@
   hosts: bastion
   gather_facts: true
   tasks:
+    - name: Verify KVM host variables are available
+      assert:
+        that:
+          - groups['kvm'] is defined
+          - groups['kvm'] | length > 0
+          - hostvars[groups['kvm'][0]]['CLUSTER_NAME'] is defined
+          - hostvars[groups['kvm'][0]]['RETRIEVE_FROM_VAULT'] is defined
+        fail_msg: |
+          Required variables are missing from KVM host. This usually means:
+          1. The KVM play didn't complete successfully
+          2. Variables weren't set as facts in the KVM play
+          3. The KVM host group is not defined in inventory
+          
+          Available KVM hosts: {{ groups['kvm'] | default([]) }}
+          Available hostvars keys: {{ hostvars[groups['kvm'][0]].keys() | list | sort if groups['kvm'] is defined and groups['kvm'] | length > 0 else 'No KVM host available' }}
+        quiet: true
+
     - name: Get cluster variables from KVM host
       set_fact:
         CLUSTER_NAME: "{{ hostvars[groups['kvm'][0]]['CLUSTER_NAME'] }}"
@@ -317,6 +371,7 @@
         HASHI_VAULT_ROLE_ID: "{{ hostvars[groups['kvm'][0]]['HASHI_VAULT_ROLE_ID'] }}"
         HASHI_VAULT_SECRET_ID: "{{ hostvars[groups['kvm'][0]]['HASHI_VAULT_SECRET_ID'] }}"
         HASHI_VAULT_PATH: "{{ hostvars[groups['kvm'][0]]['HASHI_VAULT_PATH'] }}"
+        RETRIEVE_FROM_VAULT: "{{ hostvars[groups['kvm'][0]]['RETRIEVE_FROM_VAULT'] }}"
 
     - name: Install HVAC requirement to interact with Vault
       ansible.builtin.package:
@@ -351,46 +406,98 @@
         content: "{{ INSTALL_CONFIG }}"
       when: RETRIEVE_FROM_VAULT is defined and RETRIEVE_FROM_VAULT | bool
 
+    - name: Debug RETRIEVE_FROM_VAULT variable status
+      debug:
+        msg: 
+          - "RETRIEVE_FROM_VAULT is defined: {{ RETRIEVE_FROM_VAULT is defined }}"
+          - "RETRIEVE_FROM_VAULT value: {{ RETRIEVE_FROM_VAULT | default('undefined') }}"
+          - "Should copy from KVM: {{ RETRIEVE_FROM_VAULT is not defined or not (RETRIEVE_FROM_VAULT | bool) }}"
+      when: DEBUG is defined and DEBUG | bool
+
+    - name: Check if install-config.yaml exists on KVM host
+      stat:
+        path: "{{ hostvars[groups['kvm'][0]]['OPENSHIFT_INSTALL_DIRECTORY'] }}/install-config.yaml"
+      register: kvm_install_config_stat
+      delegate_to: "{{ groups['kvm'][0] }}"
+      when: RETRIEVE_FROM_VAULT is not defined or not (RETRIEVE_FROM_VAULT | bool)
+
+    - name: Debug install-config.yaml file status on KVM host
+      debug:
+        msg: 
+          - "File path: {{ hostvars[groups['kvm'][0]]['OPENSHIFT_INSTALL_DIRECTORY'] }}/install-config.yaml"
+          - "File exists: {{ kvm_install_config_stat.stat.exists | default('check skipped') }}"
+      when: 
+        - DEBUG is defined and DEBUG | bool
+        - RETRIEVE_FROM_VAULT is not defined or not (RETRIEVE_FROM_VAULT | bool)
+
     - name: Get install-config.yaml content from KVM host (when not using vault)
       slurp:
         src: "{{ hostvars[groups['kvm'][0]]['OPENSHIFT_INSTALL_DIRECTORY'] }}/install-config.yaml"
       register: install_config_content
       delegate_to: "{{ groups['kvm'][0] }}"
-      when: RETRIEVE_FROM_VAULT is not defined or not (RETRIEVE_FROM_VAULT | bool)
+      when: 
+        - RETRIEVE_FROM_VAULT is not defined or not (RETRIEVE_FROM_VAULT | bool)
+        - kvm_install_config_stat.stat.exists
 
     - name: Copy install-config.yaml from KVM host to bastion (when not using vault)
       copy:
         dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
         content: "{{ install_config_content.content | b64decode }}"
         mode: '0644'
+        owner: "{{ INSTALL_USER }}"
+        group: "{{ INSTALL_USER }}"
+      when: 
+        - RETRIEVE_FROM_VAULT is not defined or not (RETRIEVE_FROM_VAULT | bool)
+        - kvm_install_config_stat.stat.exists
+        - install_config_content is defined
+
+    - name: Verify install-config.yaml was copied successfully
+      stat:
+        path: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
+      register: bastion_install_config_stat
       when: RETRIEVE_FROM_VAULT is not defined or not (RETRIEVE_FROM_VAULT | bool)
+
+    - name: Debug bastion install-config.yaml status
+      debug:
+        msg: 
+          - "Bastion file path: {{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
+          - "File exists on bastion: {{ bastion_install_config_stat.stat.exists | default('check skipped') }}"
+          - "File size: {{ bastion_install_config_stat.stat.size | default('unknown') }}"
+      when: 
+        - DEBUG is defined and DEBUG | bool
+        - RETRIEVE_FROM_VAULT is not defined or not (RETRIEVE_FROM_VAULT | bool)
 
 
     - name: Decide Which Binary to install with
       ansible.builtin.set_fact:
         OPENSHIFT_INSTALL_BINARY:  "{{ 'openshift-baremetal-install' if OPENSHIFT_BAREMETAL_INSTALL | default(false) | bool else 'openshift-install' }}"  
 
-    - name: Check if versioned binaries already exist
-      stat:
-        path: "{{ INSTALL_USER_BINARY_PATH }}/{{ item }}-{{ OPENSHIFT_VERSION }}"
-      register: binary_check
-      loop:
-        - oc
-        - "{{ OPENSHIFT_INSTALL_BINARY }}"
+    - block:
+      - name: Check if versioned binaries already exist
+        stat:
+          path: "{{ INSTALL_USER_BINARY_PATH }}/{{ item }}-{{ OPENSHIFT_VERSION }}"
+        register: binary_check
+        loop:
+          - oc
+          - "{{ OPENSHIFT_INSTALL_BINARY }}"
 
-    - name: Get the proper version of OpenShift
-      ansible.builtin.include_role:
-        name: download_ocp_binaries
-      when: binary_check.results | map(attribute='stat.exists') | select('equalto', false) | list | length > 0
+      - name: Get the proper version of OpenShift
+        ansible.builtin.include_role:
+          name: download_ocp_binaries
+        when: 
+          - binary_check.results | map(attribute='stat.exists') | select('equalto', false) | list | length > 0
 
-    - name: Setup KVM on Bastion
-      ansible.builtin.include_role:
-        name: bastion_libvirt
-    
-    - name: Sleep for 30 seconds and continue with play
-      ansible.builtin.wait_for:
-        timeout: 30
-      when: SLEEP is defined and SLEEP | bool
+      - name: Setup KVM on Bastion
+        ansible.builtin.include_role:
+          name: bastion_libvirt
+      
+      - name: Sleep for 30 seconds and continue with play
+        ansible.builtin.wait_for:
+          timeout: 30
+        when: SLEEP is defined and SLEEP | bool
+      
+      when: 
+        - not (SKIP_BASTION_SETUP | default(false) | bool)
       
     - name: Launch OpenShift Installer
       become: true

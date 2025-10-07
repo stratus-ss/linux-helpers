@@ -1,0 +1,16 @@
+---
+- name: Register VM info for network interface collection
+  community.libvirt.virt:
+    command: get_interfaces
+    name: "{{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
+  register: vminfo
+
+- name: Set interface and mac address facts for vm
+  ansible.builtin.set_fact:
+    "{{ vm_name | replace('-','_') }}_interfaces": "{{ vminfo.network_interfaces }}"
+
+- name: Display VM network information
+  ansible.builtin.debug:
+    msg: >
+      VM {{ vm_name }}.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} network info collected.
+      MAC address: {{ vminfo.network_interfaces[vminfo.network_interfaces.keys()|list|first].mac if vminfo.network_interfaces else 'Not available' }}
