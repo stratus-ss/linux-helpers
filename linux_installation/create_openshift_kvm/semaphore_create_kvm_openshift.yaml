@@ -54,6 +54,7 @@
         MACHINE_NETWORK: "{{ MACHINE_NETWORK | default('') }}"
         REGISTRY_CERT_VAULT_PATH: "certificates/data/mirror-registry-cert"
         SSH_KEY: "{{ SSH_KEY | default('') }}"
+        PULL_SECRET: "{{ PULL_SECRET | default('') }}"
         SERVICE_NETWORK: 172.29.0.0/20
         SUSHY_SERVER: "{{ SUSHY_SERVER | default('') }}"
         VM_BRIDGE_INTERFACE: "{{ VM_BRIDGE_INTERFACE | default(['br0']) }}"
@@ -317,8 +318,6 @@
 - name: Configure DNS
   hosts: dns
   gather_facts: false
-  vars:
-    create_dns: false
   tasks:
     - name: Get cluster parameters from KVM host
       set_fact:
@@ -328,12 +327,13 @@
         API_VIP: "{{ hostvars[groups['kvm'][0]]['API_VIP'] }}"
         APPS_VIP: "{{ hostvars[groups['kvm'][0]]['APPS_VIP'] }}"
         BOOTSTRAP_STATIC_IP: "{{ hostvars[groups['kvm'][0]]['BOOTSTRAP_STATIC_IP'] }}"
-      when: create_dns| default(false)|bool
+        PULL_SECRET: "{{ hostvars[groups['kvm'][0]]['PULL_SECRET'] }}"
+      when: "{{ hostvars[groups['kvm'][0]]['CREATE_DNS'] }}| default(false)|bool"
 
     - name: Creating DNS Entries...
       ansible.builtin.include_role:
         name: dns_settings_pfsense
-      when: create_dns| default(false)|bool
+      when: "{{ hostvars[groups['kvm'][0]]['CREATE_DNS'] }} | default(false)|bool"
 
 - name: Activate Bastion
   hosts: bastion
@@ -372,6 +372,7 @@
         HASHI_VAULT_SECRET_ID: "{{ hostvars[groups['kvm'][0]]['HASHI_VAULT_SECRET_ID'] }}"
         HASHI_VAULT_PATH: "{{ hostvars[groups['kvm'][0]]['HASHI_VAULT_PATH'] }}"
         RETRIEVE_FROM_VAULT: "{{ hostvars[groups['kvm'][0]]['RETRIEVE_FROM_VAULT'] }}"
+        PULL_SECRET: "{{ hostvars[groups['kvm'][0]]['PULL_SECRET'] }}"
 
     - name: Install HVAC requirement to interact with Vault
       ansible.builtin.package:
