@@ -21,11 +21,11 @@
         domain: "{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
         ip: "{{ BOOTSTRAP_STATIC_IP }}"
         descr: "OCP bootstrap node"
-    domain_overrides: []
 
 - name: Create DNS entry for OCP hosts
   pfsensible.core.pfsense_dns_resolver:
     state: present
+    preserve_host: true
     hosts:
       - host: "{{ item.openshift_node_shortname }}"
         domain: "{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
@@ -36,16 +36,9 @@
 - name: Add zone redirects for the api & apps
   pfsensible.core.pfsense_dns_resolver:
     state: present
+    preserve_host: true
     custom_options: |
       local-zone: "api.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}" redirect
       local-data: "api.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 86400 IN A {{ API_VIP }}"
       local-zone: "apps.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}" redirect
       local-data: "apps.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 86400 IN A {{ APPS_VIP }}"
-
-- name: add domain overrides
-  pfsensible.core.pfsense_dns_resolver:
-    state: present
-    domainoverrides:
-      - domain: "newyorktimes.com"
-        descr: "no more newyorktimes"
-        ip: "127.0.0.1" 

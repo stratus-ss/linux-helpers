@@ -37,7 +37,7 @@
 - block:
   - name: Get release image content
     ansible.builtin.uri:
-      url: https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/4.17.11/release.txt
+      url: https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/{{ OPENSHIFT_VERSION }}/release.txt
       return_content: yes
     register: release_content
 
