@@ -1,0 +1,195 @@
+- name: Gather network facts
+  setup:
+    gather_subset:
+      - network
+
+- name: Set common network variables
+  set_fact:
+    bridge_name: "{{ NETWORK_BRIDGE | default('br0') }}"
+    excluded_interfaces: ['lo', 'virbr0', 'docker0']
+
+- name: Find interface with IP address (excluding libvirt interfaces)  
+  set_fact:
+    candidate_interfaces: >-
+      {{
+        ansible_interfaces 
+        | select('match', '^(en|eth|ens|enp).*')
+        | difference(excluded_interfaces)
+        | list
+      }}
+
+- name: Get interface with valid IP and gateway
+  set_fact:
+    interface_with_ip: "{{ item }}"
+    interface_ip_address: "{{ hostvars[inventory_hostname]['ansible_' + item].ipv4.address }}"
+    interface_gateway: "{{ ansible_default_ipv4.gateway | default('') }}"
+    interface_netmask: "{{ hostvars[inventory_hostname]['ansible_' + item].ipv4.netmask }}"
+  when:
+    - interface_with_ip is not defined
+    - hostvars[inventory_hostname]['ansible_' + item].ipv4 is defined
+    - hostvars[inventory_hostname]['ansible_' + item].ipv4.address is defined
+    - hostvars[inventory_hostname]['ansible_' + item].ipv4.address != '127.0.0.1'
+    - item not in excluded_interfaces
+    - (hostvars[inventory_hostname]['ansible_' + item].ipv4.netmask | ansible.utils.ipaddr('prefix')) != '32'
+  loop: "{{ candidate_interfaces }}"
+
+- name: Fallback to ansible_default_ipv4 if no suitable interface found
+  set_fact:
+    interface_with_ip: "{{ ansible_default_ipv4.interface }}"
+    interface_ip_address: "{{ ansible_default_ipv4.address }}"
+    interface_gateway: "{{ ansible_default_ipv4.gateway }}"
+    interface_netmask: "{{ ansible_default_ipv4.netmask }}"
+  when: 
+    - interface_with_ip is not defined
+    - ansible_default_ipv4.interface is defined
+    - ansible_default_ipv4.address is defined
+    - ansible_default_ipv4.interface not in excluded_interfaces
+
+- name: Fail if no interface with IP found
+  fail:
+    msg: "No network interface with IP address found. Cannot create bridge."
+  when: interface_with_ip is not defined
+
+- name: Check if bridge already exists
+  command: ip link show {{ bridge_name }}
+  register: bridge_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Install NetworkManager and bridge utilities
+  package:
+    name: 
+      - NetworkManager
+      - bridge-utils
+    state: present
+
+- name: Ensure NetworkManager service is started and enabled
+  service:
+    name: NetworkManager
+    state: started
+    enabled: true
+
+- name: Configure bridge if it doesn't exist
+  block:
+    - name: Validate prerequisite conditions
+      assert:
+        that:
+          - interface_with_ip is defined
+          - interface_ip_address is defined
+          - interface_gateway is defined
+          - interface_netmask is defined
+        fail_msg: "Required network configuration parameters missing for bridge creation"
+
+    - name: Calculate network prefix from netmask properly
+      set_fact:
+        # Use multiple methods to ensure we get the correct prefix
+        netmask_prefix: "{{ interface_netmask | ansible.utils.ipaddr('prefix') if interface_netmask is defined else none }}"
+        ansible_prefix: "{{ ansible_default_ipv4.prefix if ansible_default_ipv4.prefix is defined else none }}"
+
+    - name: Determine correct network prefix with comprehensive fallbacks
+      set_fact:
+        # Try all available methods to get network prefix (allow user override)
+        calculated_prefix: >-
+          {%- if NETWORK_PREFIX is defined and NETWORK_PREFIX | int >= 8 and NETWORK_PREFIX | int <= 30 -%}
+            {{ NETWORK_PREFIX }}
+          {%- elif netmask_prefix is not none and netmask_prefix != '32' -%}
+            {{ netmask_prefix }}
+          {%- elif ansible_prefix is not none and ansible_prefix != '32' -%}
+            {{ ansible_prefix }}
+          {%- else -%}
+            FAILED
+          {%- endif -%}
+
+    - name: Validate network prefix was successfully determined
+      assert:
+        that:
+          - calculated_prefix is defined
+          - calculated_prefix != 'FAILED'
+          - calculated_prefix != '32'
+        fail_msg: |
+          Unable to determine network prefix. All detection methods failed.
+          Resolution: Set NETWORK_PREFIX variable (e.g., -e NETWORK_PREFIX=22) or verify interface network configuration.
+
+    - name: Set final network configuration variables
+      set_fact:
+        network_prefix: "{{ calculated_prefix }}"
+        bridge_stp: "{{ BRIDGE_STP | default(false) }}"
+        bridge_priority: "{{ BRIDGE_PRIORITY | default(32768) }}"
+        bridge_mtu: "{{ BRIDGE_MTU | default(1500) }}"
+
+    - name: Get existing connection name to disable
+      shell: |
+        nmcli -t -f NAME,DEVICE connection show --active | grep ":{{ interface_with_ip }}$" | cut -d: -f1
+      register: existing_connection
+      changed_when: false
+      failed_when: false
+
+    - name: Create bridge connection
+      community.general.nmcli:
+        conn_name: "{{ bridge_name }}"
+        ifname: "{{ bridge_name }}"
+        type: bridge
+        ip4: "{{ interface_ip_address }}/{{ network_prefix }}"
+        gw4: "{{ interface_gateway }}"
+        dns4: "{{ ansible_default_ipv4.dns.nameservers | default(['8.8.8.8', '1.1.1.1']) }}"
+        state: present
+        autoconnect: true
+        method4: manual
+        stp: "{{ bridge_stp }}"
+        priority: "{{ bridge_priority }}"
+        mtu: "{{ bridge_mtu }}"
+
+    - name: Configure physical interface as bridge port
+      community.general.nmcli:
+        conn_name: "{{ interface_with_ip }}-bridge-port"
+        ifname: "{{ interface_with_ip }}"
+        type: bridge-slave
+        master: "{{ bridge_name }}"
+        state: present
+        autoconnect: true
+        hairpin: false
+
+    - name: Store original connection for reference
+      set_fact:
+        original_connection_name: "{{ existing_connection.stdout }}"
+    
+    - name: Reload NetworkManager connections
+      ansible.builtin.command: nmcli connection reload
+      changed_when: false
+
+    - name: Wait for NetworkManager to process connection changes
+      pause:
+        seconds: 5
+
+    - name: Verify bridge is ready for activation
+      shell: nmcli connection show {{ bridge_name }} | grep -q "{{ bridge_name }}"
+      changed_when: false
+
+    - name: Activate bridge and bridge port connections
+      shell: |
+        set -e
+        # Activate bridge first (gets the IP)
+        nmcli connection up {{ bridge_name }}
+        sleep 2
+        
+        # Activate bridge slave (removes IP from physical interface)
+        nmcli connection up {{ interface_with_ip }}-bridge-port
+        sleep 2
+        
+        # Deactivate original connection if still active
+        ORIG_CONN=$(nmcli -t -f NAME,DEVICE connection show --active | grep ':{{ interface_with_ip }}$' | cut -d: -f1 | grep -v 'bridge-port' | head -1 || true)
+        if [ -n "$ORIG_CONN" ] && [ "$ORIG_CONN" != "{{ bridge_name }}" ]; then
+          nmcli connection down "$ORIG_CONN" || true
+        fi
+      register: bridge_sequence
+      changed_when: true
+
+    - name: Wait for bridge to fully initialize
+      pause:
+        seconds: 10
+
+    - name: Wait for SSH connectivity to fully stabilize
+      wait_for_connection:
+        timeout: 60
+        delay: 5
+  when: bridge_check.rc != 0

@@ -18,7 +18,7 @@
     name: "{{ INSTALL_USER }}"
     groups: libvirt
     append: yes
-  become: yes
+  become: true
 
 #Nested Virtualization
 ###########################################################################
@@ -79,5 +79,4 @@
     - is_intel
     - nested_intel.stdout is defined
     - nested_intel.stdout != 'Y'
-
 

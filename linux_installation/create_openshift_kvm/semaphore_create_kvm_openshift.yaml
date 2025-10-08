@@ -488,6 +488,10 @@
         when: 
           - binary_check.results | map(attribute='stat.exists') | select('equalto', false) | list | length > 0
 
+      - name: Setup Network Bridge on Bastion
+        ansible.builtin.include_role:
+          name: bastion_bridge_creation
+
       - name: Setup KVM on Bastion
         ansible.builtin.include_role:
           name: bastion_libvirt

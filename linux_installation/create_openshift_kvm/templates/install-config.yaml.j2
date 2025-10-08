@@ -116,11 +116,13 @@ additionalTrustBundle: |
 {% else %}
 additionalTrustBundle: ''
 {% endif %}
- 
+
+# At some point these used to have to be handled differently
+# but i dont remember why
 {% if RETRIEVE_FROM_VAULT is defined and RETRIEVE_FROM_VAULT | bool %}
 pullSecret: '{{ PULL_SECRET | to_json }}'
 {% else %}
-pullSecret: '{{ PULL_SECRET }}'
+pullSecret: '{{ PULL_SECRET | to_json }}'
 {% endif %}
  
 sshKey: '{{ SSH_KEY }}'
