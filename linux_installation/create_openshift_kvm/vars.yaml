@@ -1,43 +1,37 @@
 ---
-API_VIP: 10.11.94.40 
-APPS_VIP: 10.11.94.41
-BASE_DOMAIN: ocp4.example.com
-BOOTSTRAP_STATIC_IP: 10.11.95.95
-BOOTSTRAP_GW: 10.11.94.7
-BOOTSTRAP_DNS: 10.11.94.7
-CLUSTER_NAME: zzzzz
-CLUSTER_NETWORK: 172.30.0.0/16
-DNS_NAMESERVER: 10.11.94.7
-USE_PROXY: true
-HTTPS_PROXY: "http://mirror-registry.ocp4.example.com:3128"
-HTTP_PROXY: "http://mirror-registry.ocp4.example.com:3128"
-INSTALL_USER: ocp
-INSTALL_USER_BINARY_PATH: "/home/{{ INSTALL_USER }}/.local/bin/"
-SKIP_BASTION_SETUP: false
-SKIP_VM_CREATION: false
-OPENSHIFT_VERSION: 4.17.11
-OPENSHIFT_BAREMETAL_INSTALL: true
-OPENSHFIT_DOWNLOAD_URL: "https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/{{ OPENSHIFT_VERSION }}"
-OPENSHIFT_INSTALL_DIRECTORY: "/home/{{ INSTALL_USER }}/{{ CLUSTER_NAME }}"
-MACHINE_IP_BASE: 10.11.95
-MACHINE_IP_START: 1
-NETWORK_BRIDGE: br0
-NETWORK_INTERFACE: enp1s0
-NETWORK_GATEWAY: 10.11.94.7
-NETWORK_CIDR: 23
-NO_PROXY: localhost,127.0.0.1,api.openshift.com,example.com
-NUMBER_OF_MASTER_VMS: 3
-NUMBER_OF_WORKER_VMS: 0
-MACHINE_NETWORK: 10.11.94.0/23
-PULL_SECRET: ''
-SSH_KEY: ""
-SERVICE_NETWORK: 172.29.0.0/20
-SUSHY_SERVER: 10.11.94.1
-
 ADDITIONAL_TRUST_BUNDLE: |
     -----BEGIN CERTIFICATE-----
     example
     -----END CERTIFICATE-----
+
+API_VIP: 10.11.94.40 
+APPS_VIP: 10.11.94.41
+BASE_DOMAIN: ocp4.example.com
+BOND_SUBINTERFACE: "{{ VLANS.bond_name }}.{{ VLANS.machine_vlan_id }}"
+BOOTSTRAP_DNS: 10.11.94.7
+BOOTSTRAP_GW: 10.11.94.7
+BOOTSTRAP_STATIC_IP: 10.11.95.95
+CLUSTER_NAME: zzzzz
+CLUSTER_NETWORK: 172.30.0.0/16
+
+CONTROL_PLANE_NAMES:
+  - ocp-control1
+  - ocp-control2
+  - ocp-control3
+
+DNS_NAMESERVER: 10.11.94.7
+HASHI_VAULT_PATH: configs/data/{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
+HASHI_VAULT_ROLE_ID: ""
+HASHI_VAULT_SECRET_ID: ""
+HASHI_VAULT_URL: "https://vault.example.com"
+HTTPS_PROXY: "http://mirror-registry.ocp4.example.com:3128"
+HTTP_PROXY: "http://mirror-registry.ocp4.example.com:3128"
+INSTALL_USER: ocp
+INSTALL_USER_BINARY_PATH: "/home/{{ INSTALL_USER }}/.local/bin/"
+
+KVM_HOST_BRIDGE_NAMES: 
+  - bridge-94
+  - bridge-99
 
 KVM_PACKAGES:
   - qemu-kvm
@@ -46,30 +40,33 @@ KVM_PACKAGES:
 
 # Libvirt Storage Configuration
 # These can be overridden via extra-vars or environment-specific variable files
-LIBVIRT_POOL_NAME: "default"
-LIBVIRT_POOL_DIRECTORY: "libvirt"
 LIBVIRT_DISK_PATH: "/var/lib/{{ LIBVIRT_POOL_DIRECTORY }}"
 LIBVIRT_DISK_SIZE: 120
-VM_BRIDGE_INTERFACE: 
-  - bridge-94
-  - bridge-99
-CONTROL_PLANE_NAMES:
-  - ocp-control1
-  - ocp-control2
-  - ocp-control3
-WORKER_NAMES:
-  - ocp-worker1
-  - ocp-worker2
-  - ocp-worker3
-VM_RAM_MB: 16384
-VM_vCPUS: 6
-VM_OS: rhel9.2.0
+LIBVIRT_POOL_DIRECTORY: "libvirt"
+LIBVIRT_POOL_NAME: "default"
 
+MACHINE_IP_BASE: 10.11.95
+MACHINE_IP_START: 1
+MACHINE_NETWORK: 10.11.94.0/23
+NETWORK_CIDR: 23
+NETWORK_GATEWAY: 10.11.94.7
+NETWORK_INTERFACE: enp1s0
+NO_PROXY: localhost,127.0.0.1,api.openshift.com,example.com
+NUMBER_OF_MASTER_VMS: 3
+NUMBER_OF_WORKER_VMS: 0
+OPENSHIFT_BAREMETAL_INSTALL: true
+OPENSHIFT_EXTERNAL_BRIDGE: br0
+OPENSHIFT_INSTALL_DIRECTORY: "/home/{{ INSTALL_USER }}/{{ CLUSTER_NAME }}"
+OPENSHIFT_VERSION: 4.17.11
+OPENSHFIT_DOWNLOAD_URL: "https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/{{ OPENSHIFT_VERSION }}"
+PULL_SECRET: ''
 RETRIEVE_FROM_VAULT: false
-HASHI_VAULT_URL: "https://vault.example.com"
-HASHI_VAULT_ROLE_ID: ""
-HASHI_VAULT_SECRET_ID:  ""
-HASHI_VAULT_PATH: configs/data/{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}
+OPENSHIFT_SERVICE_NETWORK: 172.29.0.0/20
+SKIP_BASTION_SETUP: false
+SKIP_VM_CREATION: false
+SSH_KEY: ""
+SUSHY_SERVER: 10.11.94.1
+USE_PROXY: true
 
 VLANS:
     enabled: true
@@ -80,6 +77,13 @@ VLANS:
     machine_vlan_id: "94"
     mtu: "1500"
 
-BOND_SUBINTERFACE: "{{ VLANS.bond_name }}.{{ VLANS.machine_vlan_id }}"
+VM_OS: rhel9.2.0
+VM_RAM_MB: 16384
+VM_vCPUS: 6
+
+WORKER_NAMES:
+  - ocp-worker1
+  - ocp-worker2
+  - ocp-worker3
 
 # OPENSHIFT_CLUSTER_PROVISION_PARAMS is now dynamically generated in the main playbook

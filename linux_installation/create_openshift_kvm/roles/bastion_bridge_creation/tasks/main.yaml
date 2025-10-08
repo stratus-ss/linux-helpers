@@ -5,7 +5,7 @@
 
 - name: Set common network variables
   set_fact:
-    bridge_name: "{{ NETWORK_BRIDGE | default('br0') }}"
+    bridge_name: "{{ BASTION_VM_BRIDGE_INTERFACE if (BASTION_VM_BRIDGE_INTERFACE is defined and BASTION_VM_BRIDGE_INTERFACE | length > 0) else (OPENSHIFT_EXTERNAL_BRIDGE | default('br0')) }}"
     excluded_interfaces: ['lo', 'virbr0', 'docker0']
 
 - name: Find interface with IP address (excluding libvirt interfaces)  

@@ -44,8 +44,9 @@
         OPENSHIFT_BAREMETAL_INSTALL: "{{ OPENSHIFT_BAREMETAL_INSTALL | default(true) }}"
         OPENSHFIT_DOWNLOAD_URL: "{{ OPENSHFIT_DOWNLOAD_URL | default('https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/' + OPENSHIFT_VERSION) }}"
         OPENSHIFT_INSTALL_DIRECTORY: "{{ OPENSHIFT_INSTALL_DIRECTORY | default('/home/' + INSTALL_USER + '/' + CLUSTER_NAME) }}"
-        NETWORK_BRIDGE: "{{ NETWORK_BRIDGE | default('br0') }}"
+        OPENSHIFT_EXTERNAL_BRIDGE: "{{ OPENSHIFT_EXTERNAL_BRIDGE | default('br0') }}"
         NETWORK_INTERFACE: "{{ NETWORK_INTERFACE | default('eth0') }}"
+        BASTION_VM_BRIDGE_INTERFACE: "{{ BASTION_VM_BRIDGE_INTERFACE | default('') }}"
         NETWORK_GATEWAY: "{{ NETWORK_GATEWAY | default('') }}"
         NETWORK_CIDR: "{{ NETWORK_CIDR | default(24) }}"
         NO_PROXY: "{{ NO_PROXY | default('localhost,127.0.0.1') }}"
@@ -55,9 +56,9 @@
         REGISTRY_CERT_VAULT_PATH: "certificates/data/mirror-registry-cert"
         SSH_KEY: "{{ SSH_KEY | default('') }}"
         PULL_SECRET: "{{ PULL_SECRET | default('') }}"
-        SERVICE_NETWORK: 172.29.0.0/20
+        OPENSHIFT_SERVICE_NETWORK: 172.29.0.0/20
         SUSHY_SERVER: "{{ SUSHY_SERVER | default('') }}"
-        VM_BRIDGE_INTERFACE: "{{ VM_BRIDGE_INTERFACE | default(['br0']) }}"
+        KVM_HOST_BRIDGE_NAMES: "{{ KVM_HOST_BRIDGE_NAMES | default(['br0']) }}"
         VM_RAM_MB: "{{ VM_RAM_MB | default(16384) }}"
         VM_vCPUS: "{{ VM_vCPUS | default(4) }}"
         VM_OS: "{{ VM_OS | default('rhel9.2.0') }}"
@@ -373,6 +374,8 @@
         HASHI_VAULT_PATH: "{{ hostvars[groups['kvm'][0]]['HASHI_VAULT_PATH'] }}"
         RETRIEVE_FROM_VAULT: "{{ hostvars[groups['kvm'][0]]['RETRIEVE_FROM_VAULT'] }}"
         PULL_SECRET: "{{ hostvars[groups['kvm'][0]]['PULL_SECRET'] }}"
+        BASTION_VM_BRIDGE_INTERFACE: "{{ hostvars[groups['kvm'][0]]['BASTION_VM_BRIDGE_INTERFACE'] }}"
+        OPENSHIFT_EXTERNAL_BRIDGE: "{{ hostvars[groups['kvm'][0]]['OPENSHIFT_EXTERNAL_BRIDGE'] }}"
 
     - name: Install HVAC requirement to interact with Vault
       ansible.builtin.package:

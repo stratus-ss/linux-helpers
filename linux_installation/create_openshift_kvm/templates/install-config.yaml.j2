@@ -19,7 +19,7 @@ networking:
   - cidr: {{ MACHINE_NETWORK }}
   networkType: OVNKubernetes
   serviceNetwork:
-  - {{SERVICE_NETWORK }}
+  - {{OPENSHIFT_SERVICE_NETWORK }}
  
 platform:
   baremetal:
@@ -28,7 +28,7 @@ platform:
     ingressVIPs:
       - {{ APPS_VIP }}
     provisioningNetwork: Disabled
-    externalBridge: {{ NETWORK_BRIDGE }}
+    externalBridge: {{ OPENSHIFT_EXTERNAL_BRIDGE }}
     bootstrapExternalStaticIP: {{ BOOTSTRAP_STATIC_IP }}
     bootstrapExternalStaticGateway: {{ BOOTSTRAP_GW }}
     bootstrapExternalStaticDNS: {{ BOOTSTRAP_DNS }}

@@ -40,7 +40,7 @@
       <target dev='vda' bus='virtio'/>
       <address type='pci' domain='0x0000' bus='0x05' slot='0x00' function='0x0'/>
     </disk>
-    {% for bridge in VM_BRIDGE_INTERFACE %}
+    {% for bridge in KVM_HOST_BRIDGE_NAMES %}
     <interface type="bridge">
       <source bridge="{{ bridge }}"/>
       <model type="virtio"/>
