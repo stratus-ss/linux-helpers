@@ -69,6 +69,71 @@
     state: started
     enabled: true
 
+- name: Read current DNS configuration from bastion host
+  slurp:
+    src: /etc/resolv.conf
+  register: resolv_conf_content
+  ignore_errors: true
+
+- name: Debug raw resolv.conf content
+  debug:
+    msg: "Raw /etc/resolv.conf content: {{ resolv_conf_content.content | b64decode | default('failed to read') }}"
+  when: 
+    - resolv_conf_content is succeeded
+    - resolv_conf_content.content is defined
+
+- name: Debug resolv.conf parsing steps
+  debug:
+    msg:
+      - "Raw lines: {{ (resolv_conf_content.content | b64decode).split('\n') }}"
+      - "Nameserver lines: {{ (resolv_conf_content.content | b64decode).split('\n') | select('match', '^nameserver\\s+.*') | list }}"
+      - "After regex replace: {{ (resolv_conf_content.content | b64decode).split('\n') | select('match', '^nameserver\\s+.*') | map('regex_replace', '^nameserver\\s+(.*)$', '\\1') | list }}"
+  when: 
+    - resolv_conf_content is succeeded
+    - resolv_conf_content.content is defined
+
+- name: Parse nameservers from /etc/resolv.conf with simpler approach
+  set_fact:
+    current_dns_servers: >-
+      {{
+        (resolv_conf_content.content | b64decode).split('\n') 
+        | select('match', '^nameserver .*') 
+        | map('regex_replace', '^nameserver (.*)$', '\1') 
+        | map('trim')
+        | list
+      }}
+  when: 
+    - resolv_conf_content is succeeded
+    - resolv_conf_content.content is defined
+
+- name: Get ansible DNS servers from multiple possible locations
+  set_fact:
+    ansible_dns_servers: >-
+      {%- if ansible_default_ipv4.dns.nameservers is defined and ansible_default_ipv4.dns.nameservers | length > 0 -%}
+        {{ ansible_default_ipv4.dns.nameservers }}
+      {%- elif ansible_dns.nameservers is defined and ansible_dns.nameservers | length > 0 -%}
+        {{ ansible_dns.nameservers }}
+      {%- else -%}
+        []
+      {%- endif -%}
+
+- name: Set DNS servers
+  set_fact:
+    bridge_dns_servers: >-
+      {%- if ansible_dns_servers is defined and ansible_dns_servers | length > 0 -%}
+        {{ ansible_dns_servers }}
+      {%- elif current_dns_servers is defined and current_dns_servers | length > 0 -%}
+        {{ current_dns_servers }}
+      {%- else -%}
+        ['8.8.8.8', '1.1.1.1']
+      {%- endif -%}
+
+- name: Debug DNS configuration being used
+  debug:
+    msg:
+      - "Using DNS servers: {{ bridge_dns_servers }}"
+      - "Source: {% if ansible_dns_servers is defined and ansible_dns_servers | length > 0 %}ansible facts{% elif current_dns_servers is defined and current_dns_servers | length > 0 %}/etc/resolv.conf (parsed){% else %}hardcoded fallback{% endif %}"
+
 - name: Configure bridge if it doesn't exist
   block:
     - name: Validate prerequisite conditions
@@ -131,7 +196,7 @@
         type: bridge
         ip4: "{{ interface_ip_address }}/{{ network_prefix }}"
         gw4: "{{ interface_gateway }}"
-        dns4: "{{ ansible_default_ipv4.dns.nameservers | default(['8.8.8.8', '1.1.1.1']) }}"
+        dns4: "{{ bridge_dns_servers }}"
         state: present
         autoconnect: true
         method4: manual
