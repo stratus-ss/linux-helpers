@@ -507,6 +507,94 @@
       when: 
         - not (SKIP_BASTION_SETUP | default(false) | bool)
       
+    - name: Create timestamped backup of install-config.yaml
+      ansible.builtin.copy:
+        src: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml"
+        dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/install-config.yaml.{{ ansible_date_time.epoch }}"
+        owner: "{{ INSTALL_USER }}"
+        group: "{{ INSTALL_USER }}"
+        mode: '0644'
+        remote_src: true
+      when: 
+        - not (SKIP_BASTION_SETUP | default(false) | bool)
+
+    - name: Create vars.yaml dump of KVM host variables for debugging
+      ansible.builtin.copy:
+        dest: "{{ OPENSHIFT_INSTALL_DIRECTORY }}/vars.yaml"
+        owner: "{{ INSTALL_USER }}"
+        group: "{{ INSTALL_USER }}"
+        mode: '0644'
+        content: |
+          # Variables dump from KVM host play - Generated at {{ ansible_date_time.iso8601 }}
+          # Cluster Configuration Variables
+          {{ {
+            'CLUSTER_NAME': CLUSTER_NAME,
+            'BASE_DOMAIN': BASE_DOMAIN,
+            'OPENSHIFT_VERSION': OPENSHIFT_VERSION,
+            'OPENSHIFT_INSTALL_DIRECTORY': OPENSHIFT_INSTALL_DIRECTORY,
+            'INSTALL_USER': INSTALL_USER,
+            'INSTALL_USER_BINARY_PATH': INSTALL_USER_BINARY_PATH,
+            'OPENSHIFT_BAREMETAL_INSTALL': OPENSHIFT_BAREMETAL_INSTALL,
+            'OPENSHFIT_DOWNLOAD_URL': OPENSHFIT_DOWNLOAD_URL
+          } | to_nice_yaml }}
+          
+          # Network Configuration
+          {{ {
+            'API_VIP': hostvars[groups['kvm'][0]]['API_VIP'] | default(''),
+            'APPS_VIP': hostvars[groups['kvm'][0]]['APPS_VIP'] | default(''),
+            'MACHINE_NETWORK': hostvars[groups['kvm'][0]]['MACHINE_NETWORK'] | default(''),
+            'MACHINE_IP_BASE': hostvars[groups['kvm'][0]]['MACHINE_IP_BASE'] | default(''),
+            'MACHINE_IP_START': hostvars[groups['kvm'][0]]['MACHINE_IP_START'] | default(''),
+            'NETWORK_GATEWAY': hostvars[groups['kvm'][0]]['NETWORK_GATEWAY'] | default(''),
+            'NETWORK_CIDR': hostvars[groups['kvm'][0]]['NETWORK_CIDR'] | default(''),
+            'DNS_NAMESERVER': hostvars[groups['kvm'][0]]['DNS_NAMESERVER'] | default(''),
+            'OPENSHIFT_EXTERNAL_BRIDGE': OPENSHIFT_EXTERNAL_BRIDGE,
+            'NETWORK_INTERFACE': hostvars[groups['kvm'][0]]['NETWORK_INTERFACE'] | default('')
+          } | to_nice_yaml }}
+          
+          # VM Configuration
+          {{ {
+            'NUMBER_OF_MASTER_VMS': hostvars[groups['kvm'][0]]['NUMBER_OF_MASTER_VMS'] | default(''),
+            'NUMBER_OF_WORKER_VMS': hostvars[groups['kvm'][0]]['NUMBER_OF_WORKER_VMS'] | default(''),
+            'VM_RAM_MB': hostvars[groups['kvm'][0]]['VM_RAM_MB'] | default(''),
+            'VM_vCPUS': hostvars[groups['kvm'][0]]['VM_vCPUS'] | default(''),
+            'VM_OS': hostvars[groups['kvm'][0]]['VM_OS'] | default(''),
+            'CONTROL_PLANE_NAMES': hostvars[groups['kvm'][0]]['CONTROL_PLANE_NAMES'] | default([]),
+            'WORKER_NAMES': hostvars[groups['kvm'][0]]['WORKER_NAMES'] | default([])
+          } | to_nice_yaml }}
+          
+          # Libvirt Configuration
+          {{ {
+            'LIBVIRT_POOL_NAME': hostvars[groups['kvm'][0]]['LIBVIRT_POOL_NAME'] | default(''),
+            'LIBVIRT_POOL_DIRECTORY': hostvars[groups['kvm'][0]]['LIBVIRT_POOL_DIRECTORY'] | default(''),
+            'LIBVIRT_DISK_PATH': hostvars[groups['kvm'][0]]['LIBVIRT_DISK_PATH'] | default(''),
+            'LIBVIRT_DISK_SIZE': hostvars[groups['kvm'][0]]['LIBVIRT_DISK_SIZE'] | default(''),
+            'WORKER_LIBVIRT_POOL_NAME': hostvars[groups['kvm'][0]]['WORKER_LIBVIRT_POOL_NAME'] | default(''),
+            'WORKER_LIBVIRT_DISK_PATH': hostvars[groups['kvm'][0]]['WORKER_LIBVIRT_DISK_PATH'] | default(''),
+            'WORKER_LIBVIRT_DISK_SIZE': hostvars[groups['kvm'][0]]['WORKER_LIBVIRT_DISK_SIZE'] | default('')
+          } | to_nice_yaml }}
+          
+          # Generated Node Parameters
+          {{ {
+            'OPENSHIFT_CLUSTER_PROVISION_PARAMS': hostvars[groups['kvm'][0]]['OPENSHIFT_CLUSTER_PROVISION_PARAMS'] | default([])
+          } | to_nice_yaml }}
+          
+          # Vault Configuration
+          {{ {
+            'RETRIEVE_FROM_VAULT': RETRIEVE_FROM_VAULT,
+            'HASHI_VAULT_URL': HASHI_VAULT_URL,
+            'HASHI_VAULT_PATH': HASHI_VAULT_PATH
+          } | to_nice_yaml }}
+          
+          # Control Flags
+          {{ {
+            'CREATE_DNS': hostvars[groups['kvm'][0]]['CREATE_DNS'] | default(false),
+            'SKIP_BASTION_SETUP': hostvars[groups['kvm'][0]]['SKIP_BASTION_SETUP'] | default(false),
+            'SKIP_VM_CREATION': hostvars[groups['kvm'][0]]['SKIP_VM_CREATION'] | default(false)
+          } | to_nice_yaml }}
+      when: 
+        - DEBUG is defined and DEBUG | bool
+
     - name: Launch OpenShift Installer
       become: true
       become_user: "{{ INSTALL_USER }}"

@@ -16,6 +16,7 @@
 - name: Create DNS for Bootstrap
   pfsensible.core.pfsense_dns_resolver:
     state: present
+    preserve: true
     hosts:
       - host: "bootstrap"
         domain: "{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
@@ -25,7 +26,7 @@
 - name: Create DNS entry for OCP hosts
   pfsensible.core.pfsense_dns_resolver:
     state: present
-    preserve_host: true
+    preserve: true
     hosts:
       - host: "{{ item.openshift_node_shortname }}"
         domain: "{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}"
@@ -36,7 +37,7 @@
 - name: Add zone redirects for the api & apps
   pfsensible.core.pfsense_dns_resolver:
     state: present
-    preserve_host: true
+    preserve: true
     custom_options: |
       local-zone: "api.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }}" redirect
       local-data: "api.{{ CLUSTER_NAME }}.{{ BASE_DOMAIN }} 86400 IN A {{ API_VIP }}"
