@@ -1,6 +1,7 @@
 ---
 - name: Deploy Node Exporter and Register with Prometheus
-  hosts: "{{ node_exporter_host }}"
+  hosts: prometheus_server_hosts
+  gather_facts: true
   become: true
   vars_files:
     - ../prometheus_server/vars.yaml
