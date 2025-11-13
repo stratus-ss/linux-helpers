@@ -1,85 +1,203 @@
-## Notes
+# Arch Linux with ZFS on Root - Ansible Playbooks
 
-These playbooks are used to setup ZFS on root on Arch Linux using the ZFSBootMenu. 
+These playbooks are used to set up ZFS on root on Arch Linux using ZFSBootMenu.
 
-For some computers, you may need to expand the cowspace so that ansible has enough space to run
+## Quick Start
 
-```
+This guide assumes you have booted into the Arch Linux ISO and have a network connection.
+
+**⚠️ IMPORTANT:** The install is split into stages because you will need to `chroot` into your `pac-strap` environment (mounted at `/mnt`). Once in the `chroot` you will find the playbooks copied to `/mnt` where you can then launch the `02_install_wrapper.sh`
+
+## Before You Begin
+
+- Know your target disk device (e.g., `/dev/sda`, `/dev/nvme0n1`)
+  
+- Have your desired username and password ready
+  
+- (Optional) Have NFS pacman cache available
+  
+
+## Perform Installation
+
+1. **Clone the Repository:**
+  Clone this repository to your home directory.
+  
+  ```bash
+  git clone <repository_url> ~/linux-helpers
+  cd ~/linux-helpers/linux_installation/arch/playbooks
+  ```
+  
+2. **Configure Variables:**
+  Open `vars.yaml` and configure the variables to match your system and preferences. At a minimum, you **must** set the following:
+  
+  - `device_name`: Target disk device (e.g., `/dev/sda`, `/dev/nvme0n1`)
+  - `username`: Your desired username
+  - `user_password`: Your user password
+  - `luks_passphrase`: LUKS encryption passphrase (if using LUKS)
+  - `luks_volume_name`: LUKS volume name (default: `cryptroot`)
+  
+  Optional variables control features like:
+  
+  - `desktop`: Enable desktop installation
+  - `desktop_name`: Desktop environment (`cinnamon` or `deepin`)
+  - `libvirt`: Install virtualization support
+  - `nvidia_lts`: Install NVIDIA LTS drivers
+  - `use_luks`: Enable LUKS encryption
+  - `network_pacman_cache`: Use network pacman cache
+  - `remote_server`: IP address of remote server for keys/configs
+  - `enable_endeavour`: I like the endeavour Cinnamon customizations, so you can enable them.
+
+3. **Run Stage 1 (from Arch ISO):**
+  Execute the first wrapper script. This will partition your disk, set up ZFS, and install the base system.
+  
+  ```bash
+  ./01_initiation_wrapper.sh
+  ```
+  
+4. **Enter the New System:**
+  After Stage 1 completes, `chroot` into the newly installed system.
+  
+  ```bash
+  arch-chroot /mnt
+  cd /mnt 
+  ```
+  
+5. **Run Stage 2 (from `arch-chroot`):**
+  Execute the second wrapper script from within the `chroot`. This will configure the operating system, install packages, and set up your user.
+  
+  ```bash
+  ./02_install_wrapper.sh
+  ```
+  
+6. **Finalize and Reboot:**
+  The `final_stage.yaml` playbook should run automatically at the end of Stage 2 to unmount everything and reboot. If it doesn't, you may need to run it manually.
+  
+  ```bash
+  ansible-playbook tasks/final_stage.yaml
+  ```
+  
+7. **Post-Installation (Optional):**
+  After rebooting and logging into your new system, you can run the `post-install.yaml` playbook to restore application settings and install Flatpaks.
+  
+  ```bash
+  ansible-playbook post-install.yaml
+  ```
+  
+
+## How This Works Under The Hood
+
+### Prerequisites
+
+The below steps are taken care of by the `01_initiation_wrapper.sh`. The below is an explanation of how Ansible is achieving the system setup.
+
+### Expand Cowspace
+
+For some computers, you may need to expand the `cowspace` so that Ansible has enough space to run.
+
+```bash
 mount -o remount,size=2G /run/archiso/cowspace
 ```
 
-You also need to install ansible. If you have a networked pacman cache you can mount it
+### Install Ansible
 
-```
+You also need to install Ansible. If you have a networked `pacman` cache, you can mount it first.
+
+```bash
 mount -t nfs 192.168.1.1:/storage/backups/pacman_cache /var/cache/pacman/pkg
 pacman -Sy ansible
 ```
 
+> **IMPORTANT:**
+> At the time of creation, the `zfs-linux-lts` package had a dependency on an LTS kernel that was only available in `[core-testing]`. These playbooks enable this repository for the ZFS installation and then disable it afterward.
 
-**IMPORTANT:**
+## Playbook Workflow
 
-At the time of creation the `zfs-linux-lts` has a dependency on an LTS kernel that was only available in `[core-testing]` so these playbooks enable it for the ZFS installation and then disable it afterwards
+The installation is split into multiple stages due to the `arch-chroot` process. The playbooks are designed to be run in order. Configuration is handled by editing `vars.yaml`.
 
+### 1. `01_initiation_wrapper.sh`
 
-### Usage
+This script kicks off the `tasks/stage1.yaml` playbook from the live Arch ISO environment.
 
-There are several playbooks that are in use due to the way arch-chroot works. 
+- Expands the `cowspace`.
+- Mounts the network `pacman` cache (if available).
+- Installs Ansible.
+- Calls `tasks/stage1.yaml`.
 
-__01_initiation_wrapper.sh__: This kicks off the stage1 playbook, expanding the cowspace, mounting the nas and installing ansible
+### 2. `tasks/stage1.yaml`
 
-__stage1.yaml__: this playbook is to be run at the prompt when you first boot arch ISO. This playbook installs the ZFS modules and partitions the disk according to the [recommended](https://wiki.archlinux.org/title/Install_Arch_Linux_on_ZFS#Partition_scheme) parition scheme on the arch wiki. YOU NEED TO SET THE DEVICE NAME. efi_partition and zfs_partition are populated later in the playbook based off the partition scheme and device name. This playbook is using the `linux-lts` kernel.
+This playbook handles the initial disk setup.
 
-**IMPORTANT:** After this playbook runs you need to issue the `arch-chroot /mnt` command and then cd into `/mnt` where the next stage is run from.
+- Partitions the target disk and optionally sets up LUKS encryption.
+- Creates the ZFS pool and datasets.
+- Installs the base Arch Linux system into `/mnt`.
+- Copies the playbook directory to `/mnt/mnt` so it's available inside the `chroot`.
 
-__02_install_wrapper.sh__: This is a wrapper that installs the aur ansible module and then kicks off the playbook. Without this, the playbook would install the module, but then bail as ansible cannot install and then use the new module in the same playbook
+> **IMPORTANT:** After this playbook runs, you must `arch-chroot /mnt` and `cd /mnt` to run the next stage.
 
-__stage2.yaml__: This is a wrapper that establishes the variables for the rest of the playbooks. It calls `system-setup.yaml`. 
+### 3. `02_install_wrapper.sh`
 
-**IMPORTANT:** YOU NEED TO EDIT THIS FILE
+This wrapper script is run from inside the `chroot` environment.
 
-__system-setup.yaml__: This sets up the base OS install including:
-* removes everthing except for the `/boot/EFI` parition from `/etc/fstab`
-* creates your user and puts it in the sudoers file **NOTE:** initially the user has no password on sudo to prevent prompting for sudo password. This change is reverted at the end of the playbook so sudo requires a password again
-* Sets the locale to US.UTF-8
-* mounts a network pacman cache
-* updates makepkg.conf with some 'optimized' compiler flags
-* installs `yay`
-* edits mkinitcpio.conf for ZFS
-* it calls `install-zfs.yaml`
-* it optionally installs libvirt
-* it calls the `desktop.yaml` if set to true in the vars
+- Installs the `kewlfft.aur` Ansible collection, which is needed to manage AUR packages.
+- Calls `tasks/stage2.yaml`.
 
-__install-zfs.yaml__:
-* installs zfs-linux-linux and efibootmgr
-* enables systemd services
-* configures ZFSBootMenu
-* installs and configures sanoid for auto-snapshotting
-* sets packages to ignored in pacman.conf
-* runs mkinitcpio
+### 4. `tasks/stage2.yaml`
 
-* adds the endeavourOS mirrors... because I like their theming
- and adds it with `efibootmgr`
-* optionally installs flatpaks and various nvidia drivers
-* optionally installs a desktop
+This is a simple wrapper playbook that loads variables from `vars.yaml` and calls `tasks/system-setup.yaml`. It is not meant to be edited directly.
 
-__desktop.yaml__: Installs generic packages for use with all desktops (firefox, flameshot, steam etc).
-* Installs nvidia driver if applicable
-* sets a new firefox icon
-* gets the `.mozilla` file from a remote webserver and puts it inplace
-* sets some custom fstab entries
-* pulls down ssh and gpg keys from a remote source and puts them in place
-* grabs vpn settings for NetworkManager from a remote source
-* optionally triggers a specific desktop install
+### 5. `tasks/system-setup.yaml`
 
-__cinnamon.yaml__: Installs some applications and the cinnamon desktop and then enables lightdm
-* set's the EndeavourOS repo and pulls down cinnamon themes
-* adds lightdm delay and override. Sometimes lightdm starts to fast causing breakage on boot and on resume
-* adds autostart entries
+This is the main configuration playbook for the new system.
 
-__deepin.yaml__: Installs `deepin`, `deepin-kwin` and some, but not all of the deepin-extras meta package
-* CURRENTLY Broken in testing. Xorg crashes back to login on deepin. Cinnamon logs in fine.
+- Creates a user and configures `sudo` access.
+- Sets up system locale and timezone.
+- Installs `yay` (an AUR helper).
+- Calls `tasks/install-zfs.yaml` to configure ZFS within the new system.
+- Optionally installs `libvirt` for virtualization.
+- Calls `tasks/desktop.yaml` if `desktop: true` is set in `vars.yaml`.
 
-__final_stage.yaml__: This umounts the drive and exports the zpool before rebooting
-* adds efi boot entry
-* unmounts all the drives from `/mnt`
-* reboots the host
+### 6. `tasks/install-zfs.yaml`
+
+This playbook configures ZFS, ZFSBootMenu, and related services.
+
+- Installs `zfs-linux-lts` and `efibootmgr`.
+- Configures `mkinitcpio.conf` and generates the initramfs.
+- Installs and configures `sanoid` for automated snapshots.
+- Creates an EFI boot entry using `efibootmgr`.
+
+### 7. `tasks/desktop.yaml`
+
+Installs and configures a desktop environment and common applications.
+
+- Installs generic packages like Firefox, Steam, and Flameshot.
+- Pulls user-specific configurations (SSH keys, GPG keys, VPN settings) from a remote server.
+- Calls a desktop-specific playbook (`cinnamon.yaml` or `deepin.yaml`) based on the `desktop_name` variable in `vars.yaml`.
+
+### 8. `tasks/cinnamon.yaml`
+
+- Installs the Cinnamon desktop environment and related applications.
+- Enables the `lightdm` display manager.
+- Configures themes and autostart applications.
+
+### 9. `tasks/deepin.yaml`
+
+- Installs the Deepin desktop environment.
+- **Status:** Currently broken in testing.
+
+### 10. `tasks/final_stage.yaml`
+
+This is the final playbook that cleans up the installation environment.
+
+- Unmounts all partitions from `/mnt`.
+- Exports the `zpool`.
+- Reboots the system into the new Arch Linux installation.
+
+## Post-Installation and Utility Playbooks
+
+### `post-install.yaml`
+
+This playbook is designed to be run after you have successfully booted into and logged into your new system. It restores application settings and installs a list of common Flatpak applications.
+
+### `tasks/backup_configs.yaml`
+
+This is a utility playbook for backing up user configuration files (`dconf` settings, Flatpak data, `.gnupg` directory, etc.) to a remote server. It is not used during the OS installation.
