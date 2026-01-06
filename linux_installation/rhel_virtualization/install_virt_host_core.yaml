@@ -1,29 +1,29 @@
 ---
 - name: Configure Virtualization Host
-  hosts: "{{ virtualization_host }}"
+  hosts: virtualization_host
   gather_facts: yes
   become: true
 
 # Moved to awx project template
-#  vars:
-#    cockpit_packages:
-#      - cockpit
-#      - cockpit-bridge
-#      - cockpit-system
-#      - cockpit-networkmanager
-#      - cockpit-packagekit
-#      - cockpit-selinux
-#      - cockpit-storaged
-#      - cockpit-ws
-#    extra_packages:
-#      - inxi
-#      - nano
-#      - git
-#    gpu_passthrough: true
-#    kvm_packages:
-#      - qemu-kvm
-#      - libvirt
-#      - virt-install
+  vars:
+    cockpit_packages:
+      - cockpit
+      - cockpit-bridge
+      - cockpit-system
+      - cockpit-networkmanager
+      - cockpit-packagekit
+      - cockpit-selinux
+      - cockpit-storaged
+      - cockpit-ws
+    extra_packages:
+      - inxi
+      - nano
+      - git
+    gpu_passthrough: true
+    kvm_packages:
+      - qemu-kvm
+      - libvirt
+      - virt-install
 #    sanoid_repo_url: "https://github.com/jimsalterjrs/sanoid.git"
 #    sanoid_clone_path: "/tmp/sanoid"
 #    sanoid_install: true
@@ -102,20 +102,20 @@
         enabled: true
         state: started
 
-    - name: Starting ZFS Section
-      include_role: 
-        name: setup_zfs
-      when: zfs_install | default(false) | bool
+#    - name: Starting ZFS Section
+#      include_role: 
+#        name: setup_zfs
+#      when: zfs_install | default(false) | bool
 
 
     ###########################################################################
     # STEP 6: Install Sanoid
     ###########################################################################
 
-    - name: Evaluating Sanoid
-      include_role:
-        name: setup_sanoid
-      when: sanoid_install| default(false) |bool
+#    - name: Evaluating Sanoid
+#      include_role:
+#        name: setup_sanoid
+#      when: sanoid_install| default(false) |bool
 
     - name: Enable GPU Passthrough
       include_role:
