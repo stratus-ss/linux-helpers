@@ -11,41 +11,153 @@
         msg: "Please specify the device_name variable (e.g., -e device_name=/dev/sda)"
       when: device_name == '/dev/xxx'
 
-    - name: Install ZFS in the ArchISO
-      ansible.builtin.shell: curl -s https://raw.githubusercontent.com/eoli3n/archiso-zfs/master/init | bash
-      args:
-        executable: /bin/bash
-      when: use_archzfs_repo | default(true) |bool
+    - name: Fail if ZFS is used with BIOS mode
+      fail:
+        msg: "ZFS with ZFSBootMenu requires UEFI boot mode. Set boot_mode: 'uefi' or use_zfs: false"
+      when:
+        - use_zfs | default(false) | bool
+        - boot_mode == "bios"
 
-    - name: Set partition variables
+    - name: Check for ZFS support when ZFS is required
+      block:
+        - name: Check if ZFS kernel module is available
+          ansible.builtin.command: modinfo zfs
+          register: zfs_module_check
+          failed_when: false
+          changed_when: false
+
+        - name: Check if zfs command exists
+          ansible.builtin.command: which zfs
+          register: zfs_command_check
+          failed_when: false
+          changed_when: false
+
+        - name: Fail with helpful message if ZFS is not available
+          fail:
+            msg: |
+              ╔════════════════════════════════════════════════════════════════════════════╗
+              ║                    ZFS NOT AVAILABLE IN CURRENT ISO                        ║
+              ╚════════════════════════════════════════════════════════════════════════════╝
+              
+              You are attempting to install Arch Linux with ZFS on root, but the current
+              ISO does not have ZFS support built-in.
+              
+              REQUIRED: Boot from an ArchZFS ISO
+              
+              Download the latest ArchZFS ISO from:
+              → https://github.com/r-maerz/archlinux-lts-zfs/releases
+              
+              ALTERNATIVE OPTIONS:
+              1. Set 'use_zfs: false' in vars.yaml to use a traditional filesystem
+                 (ext4, xfs, btrfs, or bcachefs) with GRUB bootloader
+              
+              2. Use the standard Arch ISO and manually install ZFS (not recommended)
+              
+              ═══════════════════════════════════════════════════════════════════════════
+              Current kernel: {{ ansible_kernel }}
+              ZFS module available: {{ zfs_module_check.rc == 0 }}
+              ZFS command available: {{ zfs_command_check.rc == 0 }}
+              ═══════════════════════════════════════════════════════════════════════════
+          when:
+            - zfs_module_check.rc != 0
+            - zfs_command_check.rc != 0
+
+        - name: Display ZFS availability confirmation
+          ansible.builtin.debug:
+            msg: |
+              ✓ ZFS is available in this ISO
+              Kernel: {{ ansible_kernel }}
+              ZFS module: Present
+          when:
+            - zfs_module_check.rc == 0 or zfs_command_check.rc == 0
+
+        - name: Load ZFS module if not already loaded
+          community.general.modprobe:
+            name: zfs
+            state: present
+          when: zfs_module_check.rc == 0
+
+      when: 
+        - use_zfs | default(true) | bool
+
+    - name: Set partition variables for UEFI
       set_fact:
-        efi_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}1"
+        boot_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}1"
         zfs_partition: >-
           {% if use_luks | bool %}
           /dev/mapper/{{ luks_volume_name }}
           {% else %}
           {{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2
           {% endif %}
-        luks_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2" 
+        root_partition: "{% if use_luks | bool %}/dev/mapper/{{ luks_volume_name }}{% else %}{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2{% endif %}"
+        luks_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2"
+      when: boot_mode == "uefi"
+
+    - name: Set partition variables for BIOS
+      set_fact:
+        bios_boot_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}1"
+        boot_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2"
+        zfs_partition: >-
+          {% if use_luks | bool %}
+          /dev/mapper/{{ luks_volume_name }}
+          {% else %}
+          {{ device_name }}{% if 'nvme' in device_name %}p{% endif %}3
+          {% endif %}
+        root_partition: "{% if use_luks | bool %}/dev/mapper/{{ luks_volume_name }}{% else %}{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}3{% endif %}"
+        luks_partition: "{{ device_name }}{% if 'nvme' in device_name %}p{% endif %}3"
+      when: boot_mode == "bios" 
 
 
     - name: Zap all partitions on disk
       command: sgdisk --zap-all {{ device_name }}
 
-    - name: Create EFI partition
+    # UEFI partitioning scheme
+    - name: Create EFI boot partition (UEFI)
       command: sgdisk -n1:1M:+512M -t1:EF00 {{ device_name }}
+      when: boot_mode == "uefi"
 
-    - name: Create ZFS partition
+    - name: Create data partition for ZFS (UEFI)
       command: sgdisk -n2:0:0 -t2:BF00 {{ device_name }}
+      when:
+        - boot_mode == "uefi"
+        - use_zfs | default(true) | bool
+
+    - name: Create data partition for root filesystem (UEFI)
+      command: sgdisk -n2:0:0 -t2:8300 {{ device_name }}
+      when:
+        - boot_mode == "uefi"
+        - not use_zfs | default(false) | bool
+
+    # BIOS partitioning scheme
+    - name: Create BIOS boot partition (BIOS)
+      command: sgdisk -n1:1M:+2M -t1:EF02 {{ device_name }}
+      when: boot_mode == "bios"
+
+    - name: Create boot partition (BIOS)
+      command: sgdisk -n2:0:+512M -t2:8300 {{ device_name }}
+      when: boot_mode == "bios"
+
+    - name: Create data partition for ZFS (BIOS)
+      command: sgdisk -n3:0:0 -t3:BF00 {{ device_name }}
+      when:
+        - boot_mode == "bios"
+        - use_zfs | default(true) | bool
+
+    - name: Create data partition for root filesystem (BIOS)
+      command: sgdisk -n3:0:0 -t3:8300 {{ device_name }}
+      when:
+        - boot_mode == "bios"
+        - not use_zfs | default(false) | bool
 
     - name: Run partprobe
-      command: partprobe
+      command: partprobe {{ device_name }}
 
-    - name: Format EFI partition
+    - name: Format boot partition as FAT32
       filesystem:
         fstype: vfat
-        dev: "{{ efi_partition }}"
-        opts: "-F 32 -n EFI"
+        dev: "{{ boot_partition }}"
+        opts: "-F 32 -n BOOT"
+        force: true
 
     - name: (Create and) open the LUKS container; name it {{ luks_volume_name }}
       community.crypto.luks_device:
@@ -55,112 +167,52 @@
         passphrase: "{{ luks_passphrase }}"
       when: use_luks | default(false) | bool
 
-    - name: Load ZFS module
-      modprobe:
-        name: zfs
-        state: present
+    - name: Setup ZFS pool and datasets
+      include_tasks: pre-installation_zfs_setup.yaml
+      when: use_zfs | default(true) | bool
 
-    - name: Create ZFS pool
-      command: >
-        zpool create -f -o ashift=12
-        -O acltype=posixacl
-        -O relatime=on
-        -O xattr=sa
-        -O dnodesize=legacy
-        -O normalization=formD
-        -O mountpoint=none
-        -O canmount=off
-        -O devices=off
-        -O compression=lz4
-        -R /mnt
-        zroot {{ zfs_partition }}
+    - name: Setup in-kernel filesystem (ext4, xfs, btrfs)
+      include_tasks: pre-installation_in_kernel_fs.yaml
+      when:
+        - not use_zfs | default(false) | bool
+        - filesystem_type in ['ext4', 'xfs', 'btrfs']
 
-    - name: Create ZFS datasets
-      zfs:
-        name: "{{ item.name }}"
-        state: present
-        extra_zfs_properties:
-          mountpoint: "{{ item.mountpoint }}"
-          canmount: "{{ item.canmount | default(omit) }}"
-      loop: "{{ zfs_partition_names }}"
+    - name: Setup bcachefs filesystem
+      include_tasks: pre-installation_bcachefs.yaml
+      when:
+        - not use_zfs | default(false) | bool
+        - filesystem_type == 'bcachefs'
 
-    - name: Export ZFS pool
-      command: zpool export zroot
-      when: not use_luks| default(false) | bool
-
-    - name: Import ZFS pool
-      command: zpool import -d /dev/disk/by-path -R /mnt zroot -N
-      when: not use_luks| default(false) | bool
-
-    - name: Handle LUKS disks
-      block:
-        - name: umount ZFS drives
-          ansible.posix.mount:
-            path: "{{ item }}"
-            state: unmounted
-          loop:
-            - "/mnt/home"
-            - "/mnt/boot/EFI"
-            - "/mnt"
-        - name: Export ZFS on LUKS
-          command: zpool export zroot
-
-        - name: Close the existing LUKS container {{ luks_volume_name }}
-          community.crypto.luks_device:
-            state: "closed"
-            name: "{{ luks_volume_name }}"
-    
-        - name: Run partprobe
-          command: partprobe
-
-        - name: Reopen the existing LUKS container {{ luks_volume_name }}
-          community.crypto.luks_device:
-            device: "{{ luks_partition }}"
-            state: "opened"
-            name: "{{ luks_volume_name }}"
-            passphrase: "{{ luks_passphrase }}"
-
-        - name: Import ZFS pool
-          command: zpool import -d {{ zfs_partition }} -R /mnt zroot -N
-          
-      when: use_luks | default(false) | bool
-      
-    - name: Mount ZFS root dataset
-      command: zfs mount zroot/ROOT/default
-
-    - name: Mount ZFS home directory
-      command: zfs mount zroot/data/home
-
-    - name: Set bootfs property
-      command: zpool set bootfs=zroot/ROOT/default zroot
-
-    - name: Set cachefile property
-      command: zpool set cachefile=/etc/zfs/zpool.cache zroot
-
-    - name: Create ZFS cache directory
-      file:
-        path: /mnt/etc/zfs
-        state: directory
-
-    - name: Copy ZFS cache file
-      copy:
-        src: /etc/zfs/zpool.cache
-        dest: /mnt/etc/zfs/zpool.cache
-
-    - name: Create EFI mount directory
+    - name: Create boot mount directory (UEFI)
       file:
         path: /mnt/boot/EFI
         state: directory
+      when: boot_mode == "uefi"
+
+    - name: Create boot mount directory (BIOS)
+      file:
+        path: /mnt/boot
+        state: directory
+      when: boot_mode == "bios"
 
     - name: Run partprobe
-      command: partprobe
+      command: partprobe {{ device_name }}
 
     - name: Mount EFI partition
       mount:
         path: /mnt/boot/EFI
-        src: "{{ efi_partition }}"
+        src: "{{ boot_partition }}"
         fstype: vfat
         state: mounted
+      when: boot_mode == "uefi"
+
+    - name: Mount boot partition (BIOS)
+      mount:
+        path: /mnt/boot
+        src: "{{ boot_partition }}"
+        fstype: vfat
+        state: mounted
+      when: boot_mode == "bios"
 
     - name: Remount NFS share
       mount:
@@ -194,7 +246,7 @@
       
     - name: Copy playbook files to /mnt/mnt
       ansible.builtin.copy:
-        src: /root/linux-helpers/linux_installation/arch/playbooks/
+        src: /root/playbooks/
         dest: /mnt/mnt
         owner: root
         group: root

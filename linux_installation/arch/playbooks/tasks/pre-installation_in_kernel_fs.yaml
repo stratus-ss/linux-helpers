@@ -1,0 +1,87 @@
+---
+# Pre-installation setup for in-kernel filesystems (ext4, xfs, btrfs)
+# Called from stage1.yaml BEFORE pacstrap when use_zfs: false
+
+- name: Install filesystem packages in ArchISO
+  community.general.pacman:
+    name: "{{ filesystem_packages[filesystem_type] }}"
+    state: present
+    update_cache: false
+  vars:
+    filesystem_packages:
+      ext4: []  # e2fsprogs included in base
+      xfs: ['xfsprogs']
+      btrfs: ['btrfs-progs']
+  when: 
+    - filesystem_type in ['ext4', 'xfs', 'btrfs']
+    - filesystem_packages[filesystem_type] | length > 0
+
+- name: Format root partition - ext4
+  community.general.filesystem:
+    fstype: ext4
+    dev: "{{ root_partition }}"
+    opts: "-L ROOT"
+    force: true
+  when: filesystem_type == "ext4"
+
+- name: Format root partition - xfs
+  ansible.builtin.command: mkfs.xfs -L ROOT -f {{ root_partition }}
+  when: filesystem_type == "xfs"
+
+- name: Format root partition - btrfs
+  ansible.builtin.command: mkfs.btrfs -L ROOT -f {{ root_partition }}
+  when: filesystem_type == "btrfs"
+
+- name: Create and configure btrfs subvolumes
+  block:
+    - name: Mount btrfs root temporarily
+      ansible.posix.mount:
+        path: /mnt
+        src: "{{ root_partition }}"
+        fstype: btrfs
+        state: mounted
+
+    - name: Create btrfs @ subvolume (root)
+      ansible.builtin.command: btrfs subvolume create /mnt/@
+
+    - name: Create btrfs @home subvolume
+      ansible.builtin.command: btrfs subvolume create /mnt/@home
+
+    - name: Set @ as default subvolume
+      ansible.builtin.shell: |
+        SUBVOL_ID=$(btrfs subvolume list /mnt | grep '@$' | awk '{print $2}')
+        btrfs subvolume set-default $SUBVOL_ID /mnt
+
+    - name: Unmount temporary btrfs mount
+      ansible.posix.mount:
+        path: /mnt
+        state: unmounted
+  when: filesystem_type == "btrfs"
+
+- name: Mount root filesystem
+  ansible.posix.mount:
+    path: /mnt
+    src: "{{ root_partition }}"
+    fstype: "{{ filesystem_type }}"
+    opts: "{{ filesystem_mount_opts[filesystem_type] }}"
+    state: mounted
+  vars:
+    filesystem_mount_opts:
+      ext4: "defaults,noatime"
+      xfs: "defaults,noatime"
+      btrfs: "defaults,noatime,compress=zstd:3,space_cache=v2,subvol=@"
+
+- name: Create home directory
+  ansible.builtin.file:
+    path: /mnt/home
+    state: directory
+    mode: '0755'
+
+- name: Mount btrfs @home subvolume
+  ansible.posix.mount:
+    path: /mnt/home
+    src: "{{ root_partition }}"
+    fstype: btrfs
+    opts: "defaults,noatime,compress=zstd:3,space_cache=v2,subvol=@home"
+    state: mounted
+  when: filesystem_type == "btrfs"

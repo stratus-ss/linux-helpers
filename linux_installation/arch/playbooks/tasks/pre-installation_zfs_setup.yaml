@@ -1,0 +1,96 @@
+---
+# Pre-installation ZFS setup
+# This file handles ZFS module loading, pool creation, and dataset setup
+# Called from stage1.yaml BEFORE pacstrap
+
+- name: Load ZFS module
+  modprobe:
+    name: zfs
+    state: present
+
+- name: Create ZFS pool
+  command: >
+    zpool create -f -o ashift=12
+    -O acltype=posixacl
+    -O relatime=on
+    -O xattr=sa
+    -O dnodesize=legacy
+    -O normalization=formD
+    -O mountpoint=none
+    -O canmount=off
+    -O devices=off
+    -O compression=lz4
+    -R /mnt
+    zroot {{ zfs_partition }}
+
+- name: Create ZFS datasets
+  zfs:
+    name: "{{ item.name }}"
+    state: present
+    extra_zfs_properties:
+      mountpoint: "{{ item.mountpoint }}"
+      canmount: "{{ item.canmount | default(omit) }}"
+  loop: "{{ zfs_partition_names }}"
+
+- name: Export ZFS pool
+  command: zpool export zroot
+  when: not use_luks| default(false) | bool
+
+- name: Import ZFS pool
+  command: zpool import -d /dev/disk/by-path -R /mnt zroot -N
+  when: not use_luks| default(false) | bool
+
+- name: Handle LUKS disks
+  block:
+    - name: umount ZFS drives
+      ansible.posix.mount:
+        path: "{{ item }}"
+        state: unmounted
+      loop:
+        - "/mnt/home"
+        - "/mnt/boot/EFI"
+        - "/mnt"
+    - name: Export ZFS on LUKS
+      command: zpool export zroot
+
+    - name: Close the existing LUKS container {{ luks_volume_name }}
+      community.crypto.luks_device:
+        state: "closed"
+        name: "{{ luks_volume_name }}"
+
+    - name: Run partprobe
+      command: partprobe
+
+    - name: Reopen the existing LUKS container {{ luks_volume_name }}
+      community.crypto.luks_device:
+        device: "{{ luks_partition }}"
+        state: "opened"
+        name: "{{ luks_volume_name }}"
+        passphrase: "{{ luks_passphrase }}"
+
+    - name: Import ZFS pool
+      command: zpool import -d {{ zfs_partition }} -R /mnt zroot -N
+      
+  when: use_luks | default(false) | bool
+  
+- name: Mount ZFS root dataset
+  command: zfs mount zroot/ROOT/default
+
+- name: Mount ZFS home directory
+  command: zfs mount zroot/data/home
+
+- name: Set bootfs property
+  command: zpool set bootfs=zroot/ROOT/default zroot
+
+- name: Set cachefile property
+  command: zpool set cachefile=/etc/zfs/zpool.cache zroot
+
+- name: Create ZFS cache directory
+  file:
+    path: /mnt/etc/zfs
+    state: directory
+
+- name: Copy ZFS cache file
+  copy:
+    src: /etc/zfs/zpool.cache
+    dest: /mnt/etc/zfs/zpool.cache

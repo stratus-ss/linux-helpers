@@ -59,9 +59,9 @@
       ansible.posix.synchronize:
         src: /tmp/{{ item | regex_replace('^.*/([^/]+)/?$', '\1') }}.conf
         dest: "{{ remote_backup_path }}"
-        archive: yes
-        recursive: yes
-        partial: yes
+        archive: true
+        recursive: true
+        partial: true
         private_key: "/home/{{ local_user }}/.ssh/id_rsa"
         mode: push
       loop: "{{ dconf_list }}"
@@ -71,9 +71,9 @@
       ansible.posix.synchronize:
         src: "/home/{{ local_user }}/.var/app/{{ item }}"
         dest: "{{ remote_backup_path }}/app"
-        archive: yes
-        recursive: yes
-        partial: yes
+        archive: true
+        recursive: true
+        partial: true
         private_key: "/home/{{ local_user }}/.ssh/id_rsa"
       loop: "{{ flatpak_list }}"
       delegate_to: localhost
@@ -82,9 +82,9 @@
       ansible.posix.synchronize:
         src: "/home/{{ local_user }}/.config/autostart"
         dest: "{{ remote_backup_path }}"
-        archive: yes
-        recursive: yes
-        partial: yes
+        archive: true
+        recursive: true
+        partial: true
         private_key: "/home/{{ local_user }}/.ssh/id_rsa"
       delegate_to: localhost
 
@@ -92,9 +92,9 @@
       ansible.posix.synchronize:
         src: "/home/{{ local_user }}/.gnupg"
         dest: "{{ remote_backup_path }}"
-        archive: yes
-        recursive: yes
-        partial: yes
+        archive: true
+        recursive: true
+        partial: true
         private_key: "/home/{{ local_user }}/.ssh/id_rsa"
       delegate_to: localhost
     

@@ -9,7 +9,7 @@
     - enable_endeavour | bool
 
 - name: Install Cinnamon packages
-  become: yes
+  become: true
   become_user: "{{ username }}"
   kewlfft.aur.aur:
     use: yay
@@ -29,7 +29,7 @@
 - name: Enable systemd services
   systemd:
     name: "{{ item }}"
-    enabled: yes
+    enabled: true
   loop:
     - lightdm
 

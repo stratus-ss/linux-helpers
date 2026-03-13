@@ -51,6 +51,18 @@
     - desktop | bool
     - flatpak | bool
 
+- name: Install RustDesk (remote desktop)
+  become: true
+  become_user: "{{ username }}"
+  kewlfft.aur.aur:
+    use: yay
+    name:
+      - rustdesk-bin
+    state: present
+  when:
+    - desktop | bool
+    - install_rustdesk | default(true) | bool
+
 - name: Modify Faillock increasing number of failures to {{ faillock_retries }}
   lineinfile:
     path: "/etc/security/faillock.conf"
@@ -113,7 +125,7 @@
   copy:
     src: /mnt/configs/.bashrc
     dest: /home/{{ username }}/.bashrc
-    remote_src: yes
+    remote_src: true
     owner: "{{ username }}"
     group: "{{ username }}"
 
@@ -296,7 +308,7 @@
 - name: Enable systemd services
   systemd:
     name: "{{ item }}"
-    enabled: yes
+    enabled: true
   loop:
     - cups
 
@@ -346,10 +358,3 @@
   when:
     - desktop | bool
     - desktop_name == "kde"
-
-- name: Include Deepin tasks
-  include_tasks: deepin.yaml
-  when:
-    - desktop | bool
-    - desktop_name == "deepin"
-

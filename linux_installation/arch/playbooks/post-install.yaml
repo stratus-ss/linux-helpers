@@ -1,11 +1,11 @@
 ---
 - name: install flatpaks from flathub
   hosts: localhost
-  gather_facts: no
+  gather_facts: false
   vars_prompt:
     - name: "ansible_become_pass"
       prompt: "Sudo password"
-      private: yes
+      private: true
 
   collections:
     - community.ansible-vscode-extension
@@ -38,28 +38,28 @@
       package:
         name: flatpak
         state: present
-      ignore_errors: yes
+      ignore_errors: true
       become: true
 
     - name: Ensure gnome-keyring is installed
       package:
         name: gnome-keyring
         state: present
-      ignore_errors: yes
+      ignore_errors: true
       become: true
 
     - name: Ensure XDG is installed
       package:
         name: xdg-desktop-portal
         state: present
-      ignore_errors: yes
+      ignore_errors: true
       become: true
 
     - name: Ensure XDG GTK is installed
       package:
         name: xdg-desktop-portal-gtk
         state: present
-      ignore_errors: yes
+      ignore_errors: true
       become: true
 
     - name: Enable xdg-desktop-portal

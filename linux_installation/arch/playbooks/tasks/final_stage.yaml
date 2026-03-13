@@ -6,46 +6,65 @@
     - ../vars.yaml
   tasks:
     # This didn't seem to work inside arch-chroot
-    - name: Create EFI boot entry
+    - name: Create EFI boot entry (ZFS requires UEFI)
       command: efibootmgr --create --disk {{ device_name }} --part 1 --label "ZFSBootMenu LTS" --loader '\EFI\zbm\vmlinuz-linux-lts.EFI' --unicode
+      when: boot_mode == "uefi"
 
-    - name: Unmount /mnt/boot/EFI
+    - name: Unmount /mnt/boot/EFI (UEFI)
       ansible.posix.mount:
         path: /mnt/boot/EFI
         state: unmounted
-      ignore_errors: yes  # In case it's already unmounted
+      ignore_errors: true  # In case it's already unmounted
+      when: boot_mode == "uefi"
+
+    - name: Unmount /mnt/boot (BIOS)
+      ansible.posix.mount:
+        path: /mnt/boot
+        state: unmounted
+      ignore_errors: true  # In case it's already unmounted
+      when: boot_mode == "bios"
 
     - name: Unmount /mnt/home
       ansible.posix.mount:
         path: /mnt/home
         state: unmounted
-      ignore_errors: yes  # In case it's already unmounted
+      ignore_errors: true  # In case it's already unmounted
   
     - name: Unmount pacman cache
       ansible.posix.mount:
         path: /mnt/var/cache/pacman/pkg
         state: unmounted
-      ignore_errors: yes  # In case it's already unmounted
+      ignore_errors: true  # In case it's already unmounted
       when: network_pacman_cache | bool
     
     - name: Unmount /mnt
       ansible.posix.mount:
         path: /mnt
         state: unmounted
-      ignore_errors: yes  # In case it's already unmounted
+      ignore_errors: true  # In case it's already unmounted
 
     - name: Export zroot pool
       ansible.builtin.command:
         cmd: zpool export zroot
-      ignore_errors: yes  # In case the pool is already exported or doesn't exist
+      ignore_errors: true  # In case the pool is already exported or doesn't exist
 
-    - name: Verify all unmounts and export
+    - name: Verify all unmounts and export (UEFI)
       ansible.builtin.shell: |
         mountpoint -q /mnt/boot/EFI || echo "/mnt/boot/EFI is unmounted"
         mountpoint -q /mnt/home || echo "/mnt/home is unmounted"
         mountpoint -q /mnt || echo "/mnt is unmounted"
         zpool list zroot > /dev/null 2>&1 && echo "zroot is still imported" || echo "zroot is exported"
       register: verification_result
+      when: boot_mode == "uefi"
+
+    - name: Verify all unmounts and export (BIOS)
+      ansible.builtin.shell: |
+        mountpoint -q /mnt/boot || echo "/mnt/boot is unmounted"
+        mountpoint -q /mnt/home || echo "/mnt/home is unmounted"
+        mountpoint -q /mnt || echo "/mnt is unmounted"
+        zpool list zroot > /dev/null 2>&1 && echo "zroot is still imported" || echo "zroot is exported"
+      register: verification_result
+      when: boot_mode == "bios"
 
     - name: Display verification results
       ansible.builtin.debug:
@@ -54,4 +73,4 @@
     - name: Reboot!
       ansible.builtin.command:
         cmd: reboot
-      ignore_errors: yes 
+      ignore_errors: true 

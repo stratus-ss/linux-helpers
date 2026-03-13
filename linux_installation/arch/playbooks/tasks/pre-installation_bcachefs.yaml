@@ -1,0 +1,78 @@
+---
+# Pre-installation setup for bcachefs filesystem
+# Called from stage1.yaml BEFORE pacstrap when use_zfs: false and filesystem_type: bcachefs
+# 
+# Note: bcachefs is newer and less mature than other filesystems
+# Recommended to use separate /boot partition for better compatibility
+
+- name: Install bcachefs packages in ArchISO
+  community.general.pacman:
+    name:
+      - bcachefs-tools
+      - linux-headers
+    state: present
+    update_cache: true
+
+- name: Install bcachefs-dkms from AUR (if available in ISO)
+  block:
+    - name: Check if bcachefs-dkms is available
+      ansible.builtin.command: pacman -Ss bcachefs-dkms
+      register: bcachefs_dkms_check
+      failed_when: false
+      changed_when: false
+
+    - name: Install bcachefs-dkms if available
+      community.general.pacman:
+        name: bcachefs-dkms
+        state: present
+      when: bcachefs_dkms_check.rc == 0
+  ignore_errors: true
+
+- name: Load bcachefs kernel module
+  community.general.modprobe:
+    name: bcachefs
+    state: present
+
+- name: Format root partition with bcachefs
+  ansible.builtin.command: >
+    bcachefs format 
+    --label=ROOT 
+    --compression=zstd
+    --background_compression=zstd
+    --foreground_target=hdd
+    --promote_target=hdd
+    --metadata_replicas=1
+    --data_replicas=1
+    {{ root_partition }}
+  args:
+    creates: /dev/disk/by-label/ROOT
+
+- name: Mount bcachefs root filesystem
+  ansible.posix.mount:
+    path: /mnt
+    src: "{{ root_partition }}"
+    fstype: bcachefs
+    opts: "defaults,noatime,compression=zstd"
+    state: mounted
+
+- name: Create home directory
+  ansible.builtin.file:
+    path: /mnt/home
+    state: directory
+    mode: '0755'
+
+- name: Display bcachefs filesystem info
+  ansible.builtin.command: bcachefs fs usage /mnt
+  register: bcachefs_info
+  changed_when: false
+
+- name: Show bcachefs filesystem information
+  ansible.builtin.debug:
+    var: bcachefs_info.stdout_lines
+
+- name: Warning about bcachefs maturity
+  ansible.builtin.debug:
+    msg: |
+      WARNING: bcachefs is a newer filesystem and may have stability issues.
+      Recommended for testing and development only, not production systems.
+      Consider using btrfs if you need modern features with better maturity.

@@ -3,19 +3,31 @@
     msg: "Please specify the device_name variable (e.g., -e device_name=/dev/sda)"
   when: device_name == '/dev/xxx'
 
-- name: Remove all lines from /etc/fstab except /boot/EFI mount
+- name: Remove all lines from /etc/fstab except boot mount (UEFI) - ZFS only
   ansible.builtin.lineinfile:
     path: /etc/fstab
     regexp: '^(?!.*\s/boot/EFI\s).*$'
     state: absent
+  when:
+    - boot_mode == "uefi"
+    - use_zfs | default(false) | bool
+
+- name: Remove all lines from /etc/fstab except boot mount (BIOS) - ZFS only
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^(?!.*\s/boot\s).*$'
+    state: absent
+  when:
+    - boot_mode == "bios"
+    - use_zfs | default(false) | bool
 
 - name: Create user
   user:
     name: "{{ username }}"
     password: "{{ user_password | password_hash('sha512') }}"
     groups: users,sys,adm,log,scanner,power,rfkill,video,storage,optical,lp,audio,wheel
-    append: yes
-    create_home: yes
+    append: true
+    create_home: true
 
 - name: Enable wheel group in sudoers
   lineinfile:
@@ -23,7 +35,7 @@
     regexp: '^#\s*%wheel\s+ALL=\(ALL:ALL\)'
     line: '%wheel ALL=(ALL) NOPASSWD: ALL'
     validate: '/usr/sbin/visudo -cf %s'
-    firstmatch: yes
+    firstmatch: true
 
 - name: Generate locale
   command: locale-gen
@@ -52,7 +64,7 @@
       copy:
         src: /var/cache/pacman/pkg/pacman-6.1.0.33-x86_64.pkg.tar.zst
         dest: /tmp/
-        remote_src: yes
+        remote_src: true
 
     - name: Unmount NFS share
       mount:
@@ -84,7 +96,16 @@
     - { regexp: '^COMPRESSXZ=', line: 'COMPRESSXZ=(xz -c -z --threads=0 -)' }
     - { regexp: '^#?PKGDEST=', line: 'PKGDEST=/var/cache/pacman/pkg' }
 
-- name: Install system default packages 
+- name: Add filesystem module to mkinitcpio (XFS only)
+  lineinfile:
+    path: /etc/mkinitcpio.conf
+    regexp: '^MODULES='
+    line: "MODULES=(xfs)"
+  when:
+    - not use_zfs | default(false) | bool
+    - filesystem_type == 'xfs'
+
+- name: Install system default packages
   pacman:
     name:
       - base-devel
@@ -100,8 +121,22 @@
       - sudo
       - terminator
       - wget
+      - xfsprogs
     state: present
     update_cache: true
+
+- name: Create vconsole.conf file
+  copy:
+    content: |
+      KEYMAP=us
+      FONT=
+    dest: /etc/vconsole.conf
+    mode: '0644'
+
+- name: Rebuild initramfs for non-ZFS installations
+  command: mkinitcpio -P
+  when:
+    - not use_zfs | default(false) | bool
 
 - name: Ensure correct ownership of user's home directory
   ansible.builtin.file:
@@ -109,7 +144,7 @@
     state: directory
     owner: "{{ username }}"
     group: "{{ username }}"
-    recurse: yes
+    recurse: true
 
 - name: Clone yay repository
   git:
@@ -130,7 +165,7 @@
     src: /usr/share/zoneinfo/America/Chicago
     dest: /etc/localtime
     state: link
-    force: yes
+    force: true
 
 - name: Generate en_US Locale
   community.general.locale_gen:
@@ -140,7 +175,21 @@
     - "en_US.UTF-8"
 
 - name: start zfs install
-  include_tasks: install-zfs.yaml
+  include_tasks: final-install-zfs.yaml
+  when: use_zfs | default(true) | bool
+
+- name: Install and configure GRUB bootloader
+  include_tasks: install-grub.yaml
+  when: not use_zfs | default(false) | bool
+
+- name: Enable essential services for non-ZFS installations
+  systemd:
+    name: "{{ item }}"
+    enabled: true
+  loop:
+    - NetworkManager
+    - sshd
+  when: not use_zfs | default(false) | bool
 
 - name: install virtualization
   pacman:
@@ -154,7 +203,7 @@
 - name: Enable libvirt services
   systemd:
     name: libvirtd
-    enabled: yes
+    enabled: true
   when: libvirt | bool
 
 - name: Add virtualization groups
@@ -169,7 +218,7 @@
     - desktop | bool
 
 - name: Unmount NFS share final
-  mount:
+  ansible.posix.mount:
     path: /var/cache/pacman/pkg
     state: unmounted
   when:
@@ -198,6 +247,7 @@
       - /usr/bin/zfs list -t snapshot
     nopassword: true
     state: present
+  when: use_zfs | default(true) | bool
 
 - name: Set Storage to persistent in journald.conf
   ansible.builtin.lineinfile:
@@ -205,6 +255,7 @@
     regexp: '^#?Storage='
     line: 'Storage=persistent'
   when: 
+    - use_zfs | default(true) | bool
     - journald_on_zfs | bool
 - name: Create systemd override directory for journald
   ansible.builtin.file:
@@ -212,6 +263,7 @@
     state: directory
     mode: '0755'
   when: 
+    - use_zfs | default(true) | bool
     - journald_on_zfs | bool
 - name: Create override file for journald
   ansible.builtin.copy:
@@ -221,5 +273,6 @@
       After=zfs-mount.service
     mode: '0644'
   when: 
+    - use_zfs | default(true) | bool
     - journald_on_zfs | bool
 

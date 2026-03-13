@@ -1,10 +1,28 @@
-# Arch Linux with ZFS on Root - Ansible Playbooks
+# Arch Linux Installation - Ansible Playbooks
 
-These playbooks are used to set up ZFS on root on Arch Linux using ZFSBootMenu.
+These playbooks automate Arch Linux installation with support for:
+- **ZFS on root** using ZFSBootMenu (UEFI only)
+- **Traditional filesystems** (ext4, xfs, btrfs, bcachefs) using GRUB bootloader (UEFI or BIOS)
+
+## Prerequisites
+
+### For ZFS Installation
+
+**⚠️ IMPORTANT:** If you want to use ZFS on root (`use_zfs: true`), you **MUST** boot from an **ArchZFS ISO** that has ZFS support built-in.
+
+**Download ArchZFS ISO:**
+- Latest releases: https://github.com/eoli3n/archiso-zfs/releases
+- Build your own: https://github.com/eoli3n/archiso-zfs
+
+The standard Arch Linux ISO does **NOT** include ZFS support. If you boot from a standard ISO and try to install ZFS, the playbook will detect this and exit with a helpful error message.
+
+### For Traditional Filesystems (ext4, xfs, btrfs, bcachefs)
+
+Use the standard Arch Linux ISO from https://archlinux.org/download/
 
 ## Quick Start
 
-This guide assumes you have booted into the Arch Linux ISO and have a network connection.
+This guide assumes you have booted into the appropriate ISO and have a network connection.
 
 **⚠️ IMPORTANT:** The install is split into stages because you will need to `chroot` into your `pac-strap` environment (mounted at `/mnt`). Once in the `chroot` you will find the playbooks copied to `/mnt` where you can then launch the `02_install_wrapper.sh`
 
@@ -38,14 +56,22 @@ This guide assumes you have booted into the Arch Linux ISO and have a network co
   
   Optional variables control features like:
   
+  - `use_zfs`: Use ZFS filesystem (default: true)
+  - `filesystem_type`: Filesystem for non-ZFS installs (`ext4`, `xfs`, `btrfs`, `bcachefs`)
   - `desktop`: Enable desktop installation
-  - `desktop_name`: Desktop environment (`cinnamon` or `deepin`)
+  - `desktop_name`: Desktop environment (`cinnamon`)
   - `libvirt`: Install virtualization support
   - `nvidia_lts`: Install NVIDIA LTS drivers
   - `use_luks`: Enable LUKS encryption
   - `network_pacman_cache`: Use network pacman cache
   - `remote_server`: IP address of remote server for keys/configs
   - `enable_endeavour`: I like the endeavour Cinnamon customizations, so you can enable them.
+  
+  **Filesystem Recommendations:**
+  - `ext4`: Most stable, best for VMs and production (no snapshots)
+  - `xfs`: High performance for large files, cannot shrink partitions
+  - `btrfs`: Snapshots, compression, CoW - good ZFS alternative
+  - `bcachefs`: Newest, experimental - testing only
 
 3. **Run Stage 1 (from Arch ISO):**
   Execute the first wrapper script. This will partition your disk, set up ZFS, and install the base system.
@@ -128,7 +154,7 @@ This script kicks off the `tasks/stage1.yaml` playbook from the live Arch ISO en
 This playbook handles the initial disk setup.
 
 - Partitions the target disk and optionally sets up LUKS encryption.
-- Creates the ZFS pool and datasets.
+- Calls `tasks/pre-installation_zfs_setup.yaml` to create the ZFS pool and datasets.
 - Installs the base Arch Linux system into `/mnt`.
 - Copies the playbook directory to `/mnt/mnt` so it's available inside the `chroot`.
 
@@ -152,39 +178,76 @@ This is the main configuration playbook for the new system.
 - Creates a user and configures `sudo` access.
 - Sets up system locale and timezone.
 - Installs `yay` (an AUR helper).
-- Calls `tasks/install-zfs.yaml` to configure ZFS within the new system.
+- Calls `tasks/final-install-zfs.yaml` to configure ZFS within the new system.
 - Optionally installs `libvirt` for virtualization.
 - Calls `tasks/desktop.yaml` if `desktop: true` is set in `vars.yaml`.
 
-### 6. `tasks/install-zfs.yaml`
+### 6. Filesystem Setup Playbooks
 
-This playbook configures ZFS, ZFSBootMenu, and related services.
+The installation supports multiple filesystem options:
+
+#### `tasks/pre-installation_zfs_setup.yaml` (when `use_zfs: true`)
+
+- Loads the ZFS kernel module.
+- Creates the ZFS pool with optimized settings.
+- Creates ZFS datasets for root and home.
+- Handles LUKS encryption if enabled.
+- Mounts the datasets and sets up ZFS cache.
+
+#### `tasks/pre-installation_in_kernel_fs.yaml` (when `use_zfs: false` and `filesystem_type: ext4/xfs/btrfs`)
+
+- Installs required filesystem tools (xfsprogs, btrfs-progs).
+- Formats root partition with selected filesystem.
+- Creates btrfs subvolumes (@ for root, @home for home) if using btrfs.
+- Mounts filesystem with optimized options.
+- Sets up compression for btrfs.
+
+#### `tasks/pre-installation_bcachefs.yaml` (when `use_zfs: false` and `filesystem_type: bcachefs`)
+
+- Installs bcachefs-tools and bcachefs-dkms.
+- Loads bcachefs kernel module.
+- Formats partition with bcachefs (with compression and checksums).
+- Mounts bcachefs filesystem.
+- **Note:** bcachefs is experimental; use for testing only.
+
+### 7. `tasks/install-grub.yaml`
+
+This playbook installs and configures the GRUB bootloader for non-ZFS installations. It supports both UEFI and BIOS boot modes.
+
+- Installs GRUB, efibootmgr (for UEFI), and os-prober packages.
+- For UEFI systems: Installs GRUB to the EFI system partition at `/boot`.
+- For BIOS systems: Installs GRUB to the MBR of the target disk.
+- Configures GRUB settings including timeout and os-prober.
+- Handles LUKS encryption parameters in GRUB command line if enabled.
+- Supports optional kernel parameters for hardware fixes (touchpad, AMD GPU).
+- Generates the GRUB configuration file.
+- **Note:** This playbook is only called when `use_zfs: false`; ZFS installations use ZFSBootMenu instead.
+
+### 8. `tasks/final-install-zfs.yaml`
+
+This playbook configures ZFS, ZFSBootMenu, and related services after system installation.
 
 - Installs `zfs-linux-lts` and `efibootmgr`.
 - Configures `mkinitcpio.conf` and generates the initramfs.
 - Installs and configures `sanoid` for automated snapshots.
 - Creates an EFI boot entry using `efibootmgr`.
+- **Note:** This playbook is only called when `use_zfs: true`.
 
-### 7. `tasks/desktop.yaml`
+### 9. `tasks/desktop.yaml`
 
 Installs and configures a desktop environment and common applications.
 
 - Installs generic packages like Firefox, Steam, and Flameshot.
 - Pulls user-specific configurations (SSH keys, GPG keys, VPN settings) from a remote server.
-- Calls a desktop-specific playbook (`cinnamon.yaml` or `deepin.yaml`) based on the `desktop_name` variable in `vars.yaml`.
+- Calls a desktop-specific playbook (`cinnamon.yaml`) based on the `desktop_name` variable in `vars.yaml`.
 
-### 8. `tasks/cinnamon.yaml`
+### 10. `tasks/cinnamon.yaml`
 
 - Installs the Cinnamon desktop environment and related applications.
 - Enables the `lightdm` display manager.
 - Configures themes and autostart applications.
 
-### 9. `tasks/deepin.yaml`
-
-- Installs the Deepin desktop environment.
-- **Status:** Currently broken in testing.
-
-### 10. `tasks/final_stage.yaml`
+### 11. `tasks/final_stage.yaml`
 
 This is the final playbook that cleans up the installation environment.
 
