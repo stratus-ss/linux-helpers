@@ -55,17 +55,71 @@ This guide assumes you have booted into the appropriate ISO and have a network c
   - `luks_volume_name`: LUKS volume name (default: `cryptroot`)
   
   Optional variables control features like:
-  
+
   - `use_zfs`: Use ZFS filesystem (default: true)
   - `filesystem_type`: Filesystem for non-ZFS installs (`ext4`, `xfs`, `btrfs`, `bcachefs`)
+  - `boot_mode`: Boot mode (`uefi` or `bios`, default: `bios`)
   - `desktop`: Enable desktop installation
   - `desktop_name`: Desktop environment (`cinnamon`)
   - `libvirt`: Install virtualization support
   - `nvidia_lts`: Install NVIDIA LTS drivers
+  - `nvidia_open`: Install NVIDIA open-source drivers
+  - `nvidia_dkms`: Install NVIDIA DKMS drivers
+  - `install_qemu_guest_agent`: Install QEMU guest agent for VMs (default: true)
+  - `install_rustdesk`: Install RustDesk remote desktop (default: false)
+  - `gaming_platform`: Install Steam and Lutris for gaming (default: false)
   - `use_luks`: Enable LUKS encryption
   - `network_pacman_cache`: Use network pacman cache
+  - `nfs_path`: NFS path for pacman cache
   - `remote_server`: IP address of remote server for keys/configs
-  - `enable_endeavour`: I like the endeavour Cinnamon customizations, so you can enable them.
+  - `enable_endeavour`: Enable EndeavourOS Cinnamon customizations
+  - `flatpak`: Install Flatpak support
+  - `faillock_increase`: Increase faillock retries (default: true)
+  - `faillock_retries`: Number of login retries (default: 6)
+  - `sudoers_suspend_no_passwd`: Allow suspend without password (default: false)
+  - `old_pacman_version`: Use compatibility for older pacman versions
+  - `add_ssh_key`: Enable SSH key setup (default: false)
+  - `ssh_key_source`: Method for SSH key: `"string"`, `"file"`, or `"url"`
+  - `ssh_public_key`: SSH public key as string (when `ssh_key_source: "string"`)
+  - `ssh_key_file_path`: Path to local SSH key file (when `ssh_key_source: "file"`)
+  - `ssh_key_url`: URL to download SSH key from (when `ssh_key_source: "url"`)
+
+### SSH Key Setup
+
+The playbooks support adding SSH public keys to the new user's authorized_keys file during installation. This enables passwordless SSH access after the system boots.
+
+**To enable SSH key setup, set `add_ssh_key: true` in `vars.yaml`.**
+
+There are three methods for providing the SSH public key:
+
+1. **String variable method:**
+   ```yaml
+   add_ssh_key: true
+   ssh_key_source: "string"
+   ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC..."
+   ```
+
+2. **File path method:**
+   ```yaml
+   add_ssh_key: true
+   ssh_key_source: "file"
+   ssh_key_file_path: "/path/to/id_rsa.pub"
+   ```
+   This copies the key file from the local system to the new user's authorized_keys.
+
+3. **URL method:**
+   ```yaml
+   add_ssh_key: true
+   ssh_key_source: "url"
+   ssh_key_url: "https://example.com/ssh-key.pub"
+   ```
+   This downloads the SSH key from the specified URL.
+
+**Notes:**
+- This feature is independent of the existing `restore_user_cryptography` remote server feature
+- Both features can work independently or together
+- Proper SSH directory permissions (0700) and file permissions (0600) are set automatically
+- The feature is completely optional - default is disabled (`add_ssh_key: false`)
   
   **Filesystem Recommendations:**
   - `ext4`: Most stable, best for VMs and production (no snapshots)
@@ -121,7 +175,17 @@ The below steps are taken care of by the `01_initiation_wrapper.sh`. The below i
 For some computers, you may need to expand the `cowspace` so that Ansible has enough space to run.
 
 ```bash
-mount -o remount,size=2G /run/archiso/cowspace
+mount -o remount,size=4G /run/archiso/cowspace
+```
+
+### Initialize Pacman Keyring
+
+Initialize and populate the Arch Linux keyring to ensure package verification works:
+
+```bash
+pacman-key --init
+pacman-key --populate archlinux
+pacman -Sy archlinux-keyring --noconfirm
 ```
 
 ### Install Ansible
@@ -129,8 +193,16 @@ mount -o remount,size=2G /run/archiso/cowspace
 You also need to install Ansible. If you have a networked `pacman` cache, you can mount it first.
 
 ```bash
-mount -t nfs 192.168.1.1:/storage/backups/pacman_cache /var/cache/pacman/pkg
-pacman -Sy ansible
+mount -t nfs -o vers=3 192.168.99.95:/storage/backups/pacman_cache /var/cache/pacman/pkg
+pacman -Sy ansible --noconfirm
+```
+
+### Install Required Ansible Collections
+
+Install the necessary Ansible collections for the playbooks:
+
+```bash
+ansible-galaxy collection install community.general community.crypto ansible.posix --force
 ```
 
 > **IMPORTANT:**
@@ -144,9 +216,13 @@ The installation is split into multiple stages due to the `arch-chroot` process.
 
 This script kicks off the `tasks/stage1.yaml` playbook from the live Arch ISO environment.
 
-- Expands the `cowspace`.
-- Mounts the network `pacman` cache (if available).
+- Expands the `cowspace` to 4G.
+- Mounts the network `pacman` cache using NFS v3 (if available).
+- Initializes and populates the Arch Linux pacman keyring.
+- Updates the archlinux-keyring package.
 - Installs Ansible.
+- Installs required Ansible collections (community.general, community.crypto, ansible.posix).
+- Configures PYTHONPATH for Python 3.13/3.14 compatibility.
 - Calls `tasks/stage1.yaml`.
 
 ### 2. `tasks/stage1.yaml`

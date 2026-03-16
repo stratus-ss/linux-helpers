@@ -1,0 +1,62 @@
+---
+# QEMU Guest Agent Installation for VM Environments
+# Uses configuration variable install_qemu_guest_agent from vars.yaml
+# Falls back to automatic VM detection if variable is not set
+
+- name: Use configuration variable for QEMU guest agent installation
+  ansible.builtin.set_fact:
+    install_qga: "{{ install_qemu_guest_agent | default(false) | bool }}"
+  when: install_qemu_guest_agent is defined
+
+- name: Detect if running in VM via DMI product name (fallback)
+  ansible.builtin.stat:
+    path: /sys/class/dmi/id/product_name
+  register: dmi_product_file
+  changed_when: false
+  when: install_qemu_guest_agent is not defined
+
+- name: Set VM detection fact based on DMI product name (fallback)
+  ansible.builtin.set_fact:
+    install_qga: "{{ dmi_product_name.stdout | regex_search('VMware|QEMU|VirtualBox|KVM|Xen|innotek|Parallels|Bochs', ignorecase=true) }}"
+  when:
+    - install_qemu_guest_agent is not defined
+    - dmi_product_file.stat.exists
+
+- name: Check for hypervisor via CPU info (fallback)
+  ansible.builtin.command: lscpu | grep -i hypervisor
+  register: hypervisor_check
+  changed_when: false
+  failed_when: false
+  when:
+    - install_qemu_guest_agent is not defined
+    - not (install_qga | default(false) | bool)
+
+- name: Set VM detection fact via hypervisor check (fallback)
+  ansible.builtin.set_fact:
+    install_qga: "{{ hypervisor_check.rc == 0 }}"
+  when:
+    - install_qemu_guest_agent is not defined
+    - not (install_qga | default(false) | bool)
+    - hypervisor_check.rc is defined
+
+- name: Display QEMU guest agent installation decision
+  ansible.builtin.debug:
+    msg: "QEMU Guest Agent Installation: {{ 'Enabled (config variable)' if (install_qemu_guest_agent is defined) else ('Auto-detected as VM' if install_qga else 'Disabled') }}"
+
+- name: Install QEMU guest agent
+  community.general.pacman:
+    name: qemu-guest-agent
+    state: present
+    update_cache: true
+  when: install_qga | default(false) | bool
+
+- name: Enable and start QEMU guest agent
+  ansible.builtin.systemd:
+    name: qemu-guest-agent
+    state: started
+    enabled: true
+  when: install_qga | default(false) | bool
+
+- name: Display QEMU guest agent installation status
+  ansible.builtin.debug:
+    msg: "QEMU Guest Agent: {{ 'Installed and enabled' if (install_qga | default(false) | bool) else 'Not installed' }}"

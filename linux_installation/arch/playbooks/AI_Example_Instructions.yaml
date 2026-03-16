@@ -1,0 +1,455 @@
+# AI Installation Instructions - Arch Linux Playbooks
+
+## Overview
+Use the linux_installation/arch/playbooks to install Arch Linux with the wrapper scripts. Focus on the installation process like a human running through the installation.
+
+## Prerequisites
+- **KVM Host**: your-kvm-host (ssh root@your-kvm-host)
+- **VM Domain**: your-vm-name
+- **ISO Path**: /var/lib/libvirt/images/path/to/archlinux-archzfs-linux-lts.iso
+- **Live ISO IP**: 192.168.X.X
+- **NFS Cache**: 192.168.X.X:/path/to/pacman_cache
+
+## Configuration Files to Modify
+
+### vars.yaml (CRITICAL CHANGES)
+
+**BEFORE STARTING - Check and fix these settings:**
+
+```yaml
+# Line ~45 - MUST BE FALSE for EXT4 installations
+use_zfs: false  # ❌ CHANGE FROM true
+
+# Line ~3 - Set correct boot mode (will auto-detect)
+boot_mode: "bios"  # Change from "uefi" if VM is BIOS mode
+
+# Lines 36-37 - QEMU Guest Agent Installation
+install_qemu_guest_agent: true  # Add this for VM environments
+
+# Line ~13 - Confirm filesystem type
+filesystem_type: "ext4"  # Should be "ext4"
+
+# Line ~8 - Confirm device name
+device_name: /dev/vda  # Should be correct for VM
+
+# Lines 46-47 - Confirm user settings
+username: 'your-username'  # Target user
+user_password: 'your-secure-password'  # User password
+```
+
+## Installation Process
+
+### Phase 1: VM Preparation and Connection
+
+#### 1. Start VM and Verify Status
+```bash
+# From your workstation
+ssh root@your-kvm-host
+
+# Check VM status
+virsh list --all | grep your-vm-name
+
+# Start VM if not running
+virsh start your-vm-name
+
+# Wait for VM boot
+sleep 60
+
+# Check guest agent status
+virsh qemu-agent-command your-vm-name '{"execute":"guest-ping"}'
+```
+
+#### 2. Get VM IP Address
+```bash
+# From KVM host - Get IP via guest agent
+virsh qemu-agent-command your-vm-name '{"execute":"guest-network-get-interfaces"}' | \
+    python3 -c "import sys, json; data=json.load(sys.stdin); \
+    print([i for i in data['return'] if i['name'] != 'lo'][0]['ip-addresses'][0]['ip-address'])"
+```
+
+**Expected Output**: `192.168.X.X`
+
+#### 3. Setup SSH Access to VM
+```bash
+# Test SSH connection (may need password setup)
+ssh -o StrictHostKeyChecking=no root@192.168.X.X "echo 'SSH successful'"
+
+# If SSH fails, setup via guest agent
+# Add your SSH key:
+virsh qemu-agent-command your-vm-name '{"execute":"guest-exec","arguments":{"path":"/bin/bash","arg":["-c","mkdir -p /root/.ssh && chmod 700 /root/.ssh"],"capture-output":true}}'
+
+virsh qemu-agent-command your-vm-name '{"execute":"guest-exec","arguments":{"path":"/bin/bash","arg":["-c","echo '\''ssh-rsa YOUR_PUBLIC_KEY_HERE'\'' > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"],"capture-output":true}}'
+```
+
+#### 4. Transfer Playbooks to VM
+```bash
+# Create playbook directory
+ssh root@192.168.X.X "mkdir -p /root/playbooks"
+
+# Transfer playbooks (from your workstation)
+rsync -avz --exclude='.git' /path/to/linux-helpers/linux_installation/arch/playbooks/ root@192.168.X.X:/root/playbooks/
+
+# Verify transfer
+ssh root@192.168.X.X "ls -la /root/playbooks/ | head -20"
+```
+
+**NOTE**: The `connect_and_transfer_playbooks.sh` script has bugs with IP extraction. Use manual rsync instead.
+
+### Phase 2: Stage 1 Installation (from Live ISO)
+
+#### 1. Execute Stage 1 Wrapper Script
+```bash
+# SSH to VM
+ssh root@192.168.X.X
+
+# Navigate to playbooks
+cd /root/playbooks
+
+# Run Stage 1 installation
+bash 01_initiation_wrapper.sh
+```
+
+**What this script does:**
+- Expands cowspace to 4GB (prevents memory issues)
+- Mounts NFS pacman cache
+- Initializes pacman keyring
+- Installs Ansible with required collections
+- Runs tasks/stage1.yaml for disk setup
+
+#### 2. Monitor Stage 1 Completion
+```bash
+# Watch for completion (takes 10-15 minutes)
+# Script will show progress of partitioning and installation
+
+# Key things to verify:
+# - Disk partitioning completed
+# - EXT4 filesystem created
+# - Base system installed
+# - Playbooks copied to /mnt/mnt
+```
+
+#### 3. Verify Stage 1 Completion
+```bash
+# Check that system is installed
+ssh root@192.168.X.X "ls -la /mnt/ | head -15"
+
+# Check filesystem mounting
+ssh root@192.168.X.X "df -h /mnt"
+
+# Expected: /dev/vda3 mounted at /mnt with EXT4 filesystem
+```
+
+### Phase 3: Stage 2 Installation (from Chroot)
+
+#### 1. Enter Chroot Environment
+```bash
+# SSH to VM
+ssh root@192.168.X.X
+
+# Enter chroot
+arch-chroot /mnt
+
+# Navigate to playbooks directory
+cd /mnt
+```
+
+#### 2. Execute Stage 2 Wrapper Script
+```bash
+# Run Stage 2 installation
+bash 02_install_wrapper.sh
+```
+
+**What this script does:**
+- Installs AUR collections (kewlfft.aur)
+- Runs tasks/stage2.yaml
+- Calls tasks/system-setup.yaml for configuration
+- Creates user and configures system
+- Installs GRUB bootloader
+- Installs yay AUR helper
+- **Installs QEMU guest agent** (if install_qemu_guest_agent: true)
+
+#### 3. Monitor Stage 2 Completion
+```bash
+# Watch for completion (takes 15-25 minutes)
+# Script will show progress of configuration and installation
+
+# Key things to verify:
+# - User created
+# - SSH key configured
+# - System services enabled
+# - GRUB installed
+# - yay installed
+# - QEMU guest agent installed
+```
+
+#### 4. Verify Stage 2 Completion
+```bash
+# Check user creation
+id your-username
+groups your-username
+
+# Check SSH key
+ls -la /home/your-username/.ssh/authorized_keys
+
+# Check services
+systemctl status sshd NetworkManager
+systemctl status qemu-guest-agent  # Should be active if install_qemu_guest_agent: true
+```
+
+### Phase 4: Finalization and Reboot
+
+#### 1. Execute Final Stage (from Chroot)
+```bash
+# Still in chroot environment
+cd /mnt
+
+# Run final stage
+ansible-playbook tasks/final_stage.yaml
+```
+
+**What this does:**
+- Unmounts all filesystems (/mnt/boot, /mnt/home, /mnt)
+- Exports ZFS pool (if using ZFS, ignores errors if not)
+- Prepares for reboot
+
+#### 2. Exit Chroot and VM
+```bash
+# Exit chroot environment
+exit
+
+# Disconnect from VM
+exit
+```
+
+#### 3. Change Boot Order (from KVM Host)
+```bash
+# Connect to KVM host
+ssh root@your-kvm-host
+
+# Change boot order to hard drive first (production boot)
+virt-xml your-vm-name --edit --boot hd,cdrom
+
+# Restart VM
+virsh destroy your-vm-name && sleep 5 && virsh start your-vm-name
+```
+
+**Why this method works:**
+- `virt-xml --edit` modifies VM configuration persistently
+- Boot order: hard drive first, then CD-ROM
+- Changes persist across VM restarts
+- Simple and reliable command sequence
+
+### Phase 5: Post-Installation Verification
+
+#### 1. Wait for System Boot
+```bash
+# Wait for VM to boot from hard drive
+sleep 90
+
+# Check guest agent status
+ssh root@your-kvm-host "virsh qemu-agent-command your-vm-name '{\"execute\":\"guest-ping\"}'"
+```
+
+#### 2. Get New System IP Address
+```bash
+# From KVM host - Get IP via guest agent
+ssh root@your-kvm-host "virsh qemu-agent-command your-vm-name '{\"execute\":\"guest-network-get-interfaces\"}'" | \
+    python3 -c "import sys, json; data=json.load(sys.stdin); \
+    print([i for i in data['return'] if i['name'] != 'lo'][0]['ip-addresses'][0]['ip-address'])"
+```
+
+**Expected Output**: New IP (e.g., 192.168.X.Y)
+
+#### 3. Verify System Configuration
+```bash
+# Remove old host key
+ssh-keygen -R <NEW_IP_ADDRESS>
+
+# Test SSH access
+sshpass -p 'your-secure-password' ssh -o StrictHostKeyChecking=no your-username@<NEW_IP_ADDRESS> "whoami && uname -a"
+
+# Expected: your username, Linux kernel, not archiso
+```
+
+#### 4. Verify QEMU Guest Agent
+```bash
+# Check package installation
+ssh your-username@<NEW_IP_ADDRESS> "pacman -Q qemu-guest-agent"
+
+# Check service status
+ssh your-username@<NEW_IP_ADDRESS> "systemctl status qemu-guest-agent | head -5"
+
+# Test guest agent from KVM host
+ssh root@your-kvm-host "virsh qemu-agent-command your-vm-name '{\"execute\":\"guest-ping\"}'"
+```
+
+**Expected Output**: Package installed, service active, guest agent responding
+
+#### 5. Verify Filesystem and Boot Configuration
+```bash
+# Verify filesystem type
+ssh your-username@<NEW_IP_ADDRESS> "df -Th / | grep -v tmpfs"
+
+# Verify GRUB installation
+ssh your-username@<NEW_IP_ADDRESS> "grub-install --version"
+
+# Verify services
+ssh your-username@<NEW_IP_ADDRESS> "systemctl status sshd NetworkManager"
+```
+
+**Expected Output**: EXT4 filesystem, GRUB installed, services active
+
+#### 6. Test System Functionality
+```bash
+# Test sudo access
+ssh your-username@<NEW_IP_ADDRESS> "sudo -l"
+
+# Test package installation
+ssh your-username@<NEW_IP_ADDRESS> "yay --version"
+
+# Test yay installation
+ssh your-username@<NEW_IP_ADDRESS> "which yay && yay --version"
+
+# Verify minimal installation (no desktop)
+ssh your-username@<NEW_IP_ADDRESS> "pacman -Qs cinnamon gnome | wc -l"
+```
+
+**Expected Output**: sudo access working, yay installed, no desktop packages
+
+## Boot Order Management
+
+### For Installation (CD-ROM First)
+```bash
+ssh root@your-kvm-host "virt-xml your-vm-name --edit --boot cdrom,hd"
+ssh root@your-kvm-host "virsh destroy your-vm-name && sleep 5 && virsh start your-vm-name"
+```
+
+### For Production Boot (Hard Drive First)
+```bash
+ssh root@your-kvm-host "virt-xml your-vm-name --edit --boot hd,cdrom"
+ssh root@your-kvm-host "virsh destroy your-vm-name && sleep 5 && virsh start your-vm-name"
+```
+
+## VM Management (from KVM Host)
+
+### Guest Agent Commands
+```bash
+# Check guest agent status
+ssh root@your-kvm-host "virsh qemu-agent-command your-vm-name '{\"execute\":\"guest-ping\"}'"
+
+# Get network interfaces and IP addresses
+ssh root@your-kvm-host "virsh qemu-agent-command your-vm-name '{\"execute\":\"guest-network-get-interfaces\"}'"
+
+# Get system information
+ssh root@your-kvm-host "virsh qemu-agent-command your-vm-name '{\"execute\":\"guest-info\"}'"
+
+# Execute commands in VM
+ssh root@your-kvm-host "virsh qemu-agent-command your-vm-name '{\"execute\":\"guest-exec\",\"arguments\":{\"path\":\"/bin/bash\",\"arg\":[\"-c\",\"ip addr show\"],\"capture-output\":true}}'"
+```
+
+## Known Issues and Solutions
+
+### QEMU Guest Agent Not Installing
+**Issue**: QEMU guest agent not installed during chroot installation
+**Solution**: Add `install_qemu_guest_agent: true` to vars.yaml
+
+### Boot Order Not Persisting
+**Issue**: Changes to boot order don't persist after VM restart
+**Solution**: Use `virt-xml your-vm-name --edit --boot hd,cdrom` command
+
+### Playbook Transfer Script Bugs
+**Issue**: connect_and_transfer_playbooks.sh has IP extraction bugs
+**Solution**: Use manual rsync instead of the automated script
+
+### VM Detection Failures in Chroot
+**Issue**: Automatic VM detection fails in chroot environments
+**Solution**: Use configuration variable instead of automatic detection
+
+## Critical Configuration Checklist
+
+Before starting installation, verify:
+
+- [ ] `use_zfs: false` in vars.yaml (CRITICAL for EXT4)
+- [ ] `install_qemu_guest_agent: true` in vars.yaml (for VM environments)
+- [ ] `filesystem_type: "ext4"` in vars.yaml
+- [ ] `device_name: /dev/vda` in vars.yaml
+- [ ] `username: 'your-username'` in vars.yaml
+- [ ] `user_password: 'your-secure-password'` in vars.yaml
+- [ ] VM is running and guest agent responding
+- [ ] SSH access to VM is working
+- [ ] Playbooks transferred to VM
+
+## Success Criteria
+
+Installation is successful when all of the following are achieved:
+
+- [ ] System boots from hard drive (not ISO)
+- [ ] SSH access works with password authentication
+- [ ] SSH access works with key authentication
+- [ ] User account is accessible
+- [ ] EXT4 filesystem is on /dev/vda3
+- [ ] GRUB bootloader is installed and working
+- [ ] QEMU guest agent is installed (if install_qemu_guest_agent: true)
+- [ ] QEMU guest agent service is running
+- [ ] Essential services running: sshd, NetworkManager, qemu-guest-agent
+- [ ] System is minimal base installation (no desktop)
+- [ ] yay AUR helper is installed
+- [ ] System is ready for cloning
+
+## Troubleshooting
+
+### Stage 1 Fails
+- Check vars.yaml configuration (especially use_zfs setting)
+- Verify VM has enough resources (4GB RAM recommended)
+- Check disk availability: `lsblk` on VM
+
+### Stage 2 Fails
+- Check that playbook files are properly formatted (YAML syntax)
+- Verify chroot environment is working: `arch-chroot /mnt /bin/bash`
+- Check for yay directory conflicts: `rm -rf /home/your-username/yay`
+
+### System Won't Boot
+- Change boot order to CD-ROM first and restart VM
+- Check GRUB installation in chroot: `grub-install --version`
+- Verify filesystem: `lsblk -f /dev/vda`
+
+### QEMU Guest Agent Not Working
+- Verify package: `pacman -Q qemu-guest-agent`
+- Check service: `systemctl status qemu-guest-agent`
+- Test from KVM host: `virsh qemu-agent-command your-vm-name '{\"execute\":\"guest-ping\"}'`
+- Ensure configuration variable: `install_qemu_guest_agent: true`
+
+## Important Notes
+
+1. **QEMU Guest Agent Installation**: The playbooks support both automatic VM detection and configuration-based installation. For VM environments, set `install_qemu_guest_agent: true` in vars.yaml to ensure reliable installation.
+
+2. **Boot Order Management**: Always use `virt-xml --edit` command for persistent changes. Other methods like `sed` on temporary files don't persist properly.
+
+3. **Filesystem Selection**: For EXT4 installations, `use_zfs` must be `false` in vars.yaml. The `filesystem_type` should be `"ext4"`.
+
+4. **Chroot Environment**: During Stage 2, you're in a chroot environment. Commands that need access to host hardware (like VM detection) may not work properly.
+
+5. **Boot Mode**: The VM may be BIOS or UEFI mode. The playbook will auto-detect, but you can set `boot_mode` in vars.yaml if needed.
+
+6. **Minimal Installation**: The goal is to create a minimal base VM suitable for cloning. No desktop or extra packages should be installed.
+
+7. **Documentation**: If you encounter issues or make changes, document them in a markdown file in the playbook directory for future reference.
+
+## System Access After Installation
+
+**SSH Access**: `ssh your-username@<DISCOVERED_IP_ADDRESS>`
+**Password**: `your-secure-password`
+**Default User**: `your-username`
+**Default Password**: `your-secure-password`
+
+**VM Management**:
+- KVM Host: `ssh root@your-kvm-host`
+- VM Name: `your-vm-name`
+
+## Next Steps After Successful Installation
+
+1. Review playbook changes made during installation
+2. Test VM cloning from this base installation
+3. Consider implementing additional security hardening
+4. Update any automation scripts with working methods
+5. Create VM templates for future deployments

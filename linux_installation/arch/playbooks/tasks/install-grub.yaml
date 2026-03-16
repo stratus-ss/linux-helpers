@@ -1,0 +1,151 @@
+---
+# GRUB Bootloader Installation for Arch Linux
+# Based on: https://wiki.archlinux.org/title/GRUB
+# Supports both UEFI and BIOS boot modes
+
+- name: Install GRUB and related packages
+  pacman:
+    name:
+      - grub
+      - efibootmgr  # Required for UEFI systems
+      - os-prober   # Optional: for detecting other operating systems
+    state: present
+    update_cache: false
+
+- name: Install GRUB for UEFI systems
+  block:
+    - name: Ensure EFI directory exists
+      ansible.builtin.file:
+        path: /boot
+        state: directory
+        mode: '0755'
+
+    - name: Install GRUB to EFI system partition
+      ansible.builtin.command:
+        cmd: >
+          grub-install
+          --target=x86_64-efi
+          --efi-directory=/boot
+          --removable
+      register: grub_install_result
+      changed_when: grub_install_result.rc == 0
+      failed_when: grub_install_result.rc != 0
+
+    - name: Display GRUB UEFI installation output
+      ansible.builtin.debug:
+        var: grub_install_result.stdout_lines
+      when: grub_install_result.stdout_lines is defined
+
+  when: boot_mode == "uefi"
+
+- name: Install GRUB for BIOS systems
+  block:
+    - name: Install GRUB to MBR
+      ansible.builtin.command:
+        cmd: >
+          grub-install
+          --target=i386-pc
+          --recheck
+          {{ device_name }}
+      register: grub_install_bios_result
+      changed_when: grub_install_bios_result.rc == 0
+      failed_when: grub_install_bios_result.rc != 0
+
+    - name: Display GRUB BIOS installation output
+      ansible.builtin.debug:
+        var: grub_install_bios_result.stdout_lines
+      when: grub_install_bios_result.stdout_lines is defined
+
+  when: boot_mode == "bios"
+
+- name: Enable os-prober in GRUB configuration
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^#?GRUB_DISABLE_OS_PROBER='
+    line: 'GRUB_DISABLE_OS_PROBER=false'
+    state: present
+
+- name: Set GRUB timeout
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_TIMEOUT='
+    line: 'GRUB_TIMEOUT=5'
+    state: present
+
+- name: Configure GRUB command line (LUKS support)
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX='
+    line: 'GRUB_CMDLINE_LINUX="cryptdevice=UUID={{ luks_partition_uuid }}:{{ luks_volume_name }} root=/dev/mapper/{{ luks_volume_name }}"'
+    state: present
+  when: use_luks | default(false) | bool
+
+- name: Get UUID of LUKS partition for GRUB
+  ansible.builtin.command: blkid -s UUID -o value {{ device_name }}{% if 'nvme' in device_name %}p{% endif %}2
+  register: luks_uuid_output
+  changed_when: false
+  when: use_luks | default(false) | bool
+
+- name: Set LUKS partition UUID variable
+  ansible.builtin.set_fact:
+    luks_partition_uuid: "{{ luks_uuid_output.stdout }}"
+  when: use_luks | default(false) | bool
+
+- name: Update GRUB command line with correct LUKS UUID
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX='
+    line: 'GRUB_CMDLINE_LINUX="cryptdevice=UUID={{ luks_partition_uuid }}:{{ luks_volume_name }} root=/dev/mapper/{{ luks_volume_name }}"'
+    state: present
+  when: use_luks | default(false) | bool
+
+- name: Add additional kernel parameters (touchpad fix)
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+    line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 i8042.reset i8042.nomux=1 initcall_blacklist=dw_i2c_init_driver,dw_i2c_driver_init"'
+    state: present
+  when: touchpad_fix | default(false) | bool
+
+- name: Add additional kernel parameters (AMD GPU fix)
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+    line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 amdgpu.dc=1"'
+    state: present
+  when: amdgpu_fix | default(false) | bool
+
+- name: Set default kernel parameters (no special fixes)
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+    line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3"'
+    state: present
+  when:
+    - not (touchpad_fix | default(false) | bool)
+    - not (amdgpu_fix | default(false) | bool)
+
+- name: Generate GRUB configuration file
+  ansible.builtin.command:
+    cmd: grub-mkconfig -o /boot/grub/grub.cfg
+  register: grub_mkconfig_result
+  changed_when: "'Generating grub configuration file' in grub_mkconfig_result.stdout"
+
+- name: Display GRUB configuration generation output
+  ansible.builtin.debug:
+    msg: "{{ grub_mkconfig_result.stdout_lines }}"
+  when: grub_mkconfig_result.stdout_lines is defined
+
+- name: Verify GRUB installation (UEFI)
+  ansible.builtin.command: efibootmgr -v
+  register: efibootmgr_output
+  changed_when: false
+  failed_when: false
+  when: boot_mode == "uefi"
+
+- name: Display EFI boot entries
+  ansible.builtin.debug:
+    msg: "{{ efibootmgr_output.stdout_lines }}"
+  when:
+    - boot_mode == "uefi"
+    - efibootmgr_output.stdout_lines is defined

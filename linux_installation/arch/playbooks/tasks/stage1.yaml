@@ -11,6 +11,44 @@
         msg: "Please specify the device_name variable (e.g., -e device_name=/dev/sda)"
       when: device_name == '/dev/xxx'
 
+    - name: Detect actual system boot mode
+      ansible.builtin.stat:
+        path: /sys/firmware/efi
+      register: efi_firmware_check
+      changed_when: false
+
+    - name: Set actual boot mode variable
+      ansible.builtin.set_fact:
+        actual_boot_mode: "{{ 'uefi' if efi_firmware_check.stat.exists else 'bios' }}"
+
+    - name: Display detected boot mode
+      ansible.builtin.debug:
+        msg: "Detected boot mode: {{ actual_boot_mode | upper }} (configured: {{ boot_mode | upper }})"
+
+    - name: Fail if boot mode configuration doesn't match actual system
+      ansible.builtin.fail:
+        msg: |
+          ╔════════════════════════════════════════════════════════════════════════════╗
+          ║              BOOT MODE MISMATCH - CONFIGURATION ERROR                        ║
+          ╚════════════════════════════════════════════════════════════════════════════╝
+
+          The system is actually booted in {{ actual_boot_mode | upper }} mode,
+          but your configuration specifies {{ boot_mode | upper }} mode.
+
+          REQUIRED ACTION:
+          Please correct the 'boot_mode' variable in vars.yaml:
+          → Set boot_mode: "{{ actual_boot_mode }}" to match your actual system
+
+          To verify boot mode manually:
+          → Check if /sys/firmware/efi exists (UEFI) or doesn't (BIOS)
+          → Run: ls /sys/firmware/efi
+
+          ═══════════════════════════════════════════════════════════════════════════
+          Actual boot mode:   {{ actual_boot_mode | upper }}
+          Configured mode:    {{ boot_mode | upper }}
+          ═══════════════════════════════════════════════════════════════════════════
+      when: boot_mode != actual_boot_mode
+
     - name: Fail if ZFS is used with BIOS mode
       fail:
         msg: "ZFS with ZFSBootMenu requires UEFI boot mode. Set boot_mode: 'uefi' or use_zfs: false"

@@ -29,6 +29,10 @@
     append: true
     create_home: true
 
+- name: Setup SSH key authentication
+  include_tasks: setup-ssh-key.yaml
+  when: add_ssh_key | bool
+
 - name: Enable wheel group in sudoers
   lineinfile:
     path: /etc/sudoers
@@ -190,6 +194,9 @@
     - NetworkManager
     - sshd
   when: not use_zfs | default(false) | bool
+
+- name: Install QEMU guest agent for VM environments
+  include_tasks: install-qemu-guest-agent.yaml
 
 - name: install virtualization
   pacman:
