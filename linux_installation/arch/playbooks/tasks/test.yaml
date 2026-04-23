@@ -32,9 +32,9 @@
       ansible.posix.synchronize:
         src: "{{ remote_server_url }}/{{ item | regex_replace('^.*/([^/]+)/?$', '\\1') }}.conf"
         dest: "{{ restore_dir }}"
-        archive: yes
-        recursive: yes
-        partial: yes
+        archive: true
+        recursive: true
+        partial: true
         mode: pull
       loop: "{{ dconf_list }}"
       delegate_to: localhost
@@ -43,24 +43,24 @@
       ansible.posix.synchronize:
         src: "{{ remote_server_url }}/app"
         dest: "{{ restore_dir }}"
-        archive: yes
-        recursive: yes
-        partial: yes
+        archive: true
+        recursive: true
+        partial: true
       delegate_to: localhost
 
     - name: Synchronize autostart folder
       ansible.posix.synchronize:
         src: "{{ remote_server_url }}/.config/autostart"
         dest: "{{ restore_dir }}"
-        archive: yes
-        recursive: yes
-        partial: yes
+        archive: true
+        recursive: true
+        partial: true
       delegate_to: localhost
 
     - name: Synchronize gnupg folder
       ansible.posix.synchronize:
         src: "{{ remote_server_url }}/.gnupg"
         dest: "{{ restore_dir }}"
-        archive: yes
-        recursive: yes
+        archive: true
+        recursive: true
       delegate_to: localhost

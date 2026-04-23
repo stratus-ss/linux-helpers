@@ -100,6 +100,13 @@
     - { regexp: '^COMPRESSXZ=', line: 'COMPRESSXZ=(xz -c -z --threads=0 -)' }
     - { regexp: '^#?PKGDEST=', line: 'PKGDEST=/var/cache/pacman/pkg' }
 
+- name: Ensure build user can write to PKGDEST
+  file:
+    path: /var/cache/pacman/pkg
+    state: directory
+    mode: '0775'
+    group: wheel
+
 - name: Add filesystem module to mkinitcpio (XFS only)
   lineinfile:
     path: /etc/mkinitcpio.conf
@@ -129,6 +136,52 @@
     state: present
     update_cache: true
 
+- name: Install additional system utilities
+  pacman:
+    name:
+      - bottom
+      - fastfetch
+      - iftop
+      - iotop
+      - jq
+      - nmap
+      - openvpn
+      - pv
+      - screen
+    state: present
+    update_cache: true
+
+- name: Install Docker
+  pacman:
+    name:
+      - docker
+      - docker-buildx
+      - docker-compose
+    state: present
+    update_cache: true
+  when:
+    - install_docker | bool
+
+- name: Install Cockpit web dashboard
+  pacman:
+    name:
+      - cockpit
+      - cockpit-machines
+      - cockpit-storaged
+    state: present
+    update_cache: true
+  when:
+    - install_cockpit | bool
+
+- name: Install Tailscale VPN
+  pacman:
+    name:
+      - tailscale
+    state: present
+    update_cache: true
+  when:
+    - install_tailscale | bool
+
 - name: Create vconsole.conf file
   copy:
     content: |
@@ -149,20 +202,6 @@
     owner: "{{ username }}"
     group: "{{ username }}"
     recurse: true
-
-- name: Clone yay repository
-  git:
-    repo: https://aur.archlinux.org/yay-git.git
-    dest: /home/{{ username }}/yay
-  become: true
-  become_user: "{{ username }}"
-
-- name: Build and install yay
-  command: makepkg -si --noconfirm
-  args:
-    chdir: /home/{{ username }}/yay
-  become: true
-  become_user: "{{ username }}"
 
 - name: Set timezone
   file:
@@ -197,6 +236,20 @@
 
 - name: Install QEMU guest agent for VM environments
   include_tasks: install-qemu-guest-agent.yaml
+
+- name: Clone yay repository
+  git:
+    repo: https://aur.archlinux.org/yay-git.git
+    dest: /home/{{ username }}/yay
+  become: true
+  become_user: "{{ username }}"
+
+- name: Build and install yay
+  command: makepkg -si --noconfirm
+  args:
+    chdir: /home/{{ username }}/yay
+  become: true
+  become_user: "{{ username }}"
 
 - name: install virtualization
   pacman:

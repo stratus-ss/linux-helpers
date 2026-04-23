@@ -63,6 +63,19 @@
     - desktop | bool
     - install_rustdesk | default(true) | bool
 
+- name: Install AI coding tools
+  become: true
+  become_user: "{{ username }}"
+  kewlfft.aur.aur:
+    use: yay
+    name:
+      - claude-code
+      - opencode-bin
+    state: present
+  when:
+    - desktop | bool
+    - install_ai_tools | bool
+
 - name: Modify Faillock increasing number of failures to {{ faillock_retries }}
   lineinfile:
     path: "/etc/security/faillock.conf"
@@ -77,10 +90,12 @@
   kewlfft.aur.aur:
     use: yay
     name:
-      - beeper
-      - brscan5
+      - appimagelauncher
+      - audacity
       - cups
+      - drawio-desktop
       - eog
+      - ente-auth-bin
       - evince
       - file-roller
       - firefox
@@ -93,11 +108,12 @@
       - gvfs
       - gvfs-nfs
       - gvfs-smb
-      - makemkv
+      - imagemagick
+      - meld
       - mlocate
-      - openaudible-bin
+      - mpv
+      - nautilus
       - simple-scan
-      - spideroak-one
       - system-config-printer
       - terminator
       - ulauncher
@@ -311,6 +327,35 @@
     enabled: true
   loop:
     - cups
+
+- name: Enable Docker service
+  systemd:
+    name: docker
+    enabled: true
+  when:
+    - install_docker | bool
+
+- name: Add user to docker group
+  user:
+    name: "{{ username }}"
+    groups: docker
+    append: true
+  when:
+    - install_docker | bool
+
+- name: Enable Cockpit socket
+  systemd:
+    name: cockpit.socket
+    enabled: true
+  when:
+    - install_cockpit | bool
+
+- name: Enable Tailscale daemon
+  systemd:
+    name: tailscaled
+    enabled: true
+  when:
+    - install_tailscale | bool
 
 - name: Ensure [multilib] section and Include line are uncommented in pacman.conf
   ansible.builtin.blockinfile:
