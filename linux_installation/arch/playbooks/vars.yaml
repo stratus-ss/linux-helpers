@@ -10,12 +10,12 @@ efi_partition: "" # this is initiated blank
 enable_endeavour: false
 faillock_increase: true
 faillock_retries: 6
-filesystem_type: "xfs"  # XFS on root partition
+filesystem_type: "xfs" # XFS on root partition
 flatpak: false
 fstab_directories: []
 fstab_entries: []
 gaming_platform: false
-install_qemu_guest_agent: true  # Install QEMU guest agent for VM environments
+install_qemu_guest_agent: true # Install QEMU guest agent for VM environments
 install_rustdesk: false
 install_ai_tools: false
 install_cockpit: false
@@ -26,7 +26,7 @@ libvirt: false
 luks_passphrase: "" # FILL ME
 luks_volume_name: "cryptroot"
 network_pacman_cache: false
-nfs_path: '{{ remote_server }}:/storage/backups/pacman_cache'
+nfs_path: "{{ remote_server }}:/storage/backups/pacman_cache"
 nvidia_dkms: false
 nvidia_lts: false
 nvidia_open: false
@@ -37,28 +37,28 @@ restore_user_cryptography: false
 sudoers_suspend_no_passwd: false
 
 # SSH Key Setup (Optional)
-add_ssh_key: true                           # Enable/disable SSH key feature
-ssh_key_source: "string"                    # Method: "string", "file", or "url"
+add_ssh_key: true # Enable/disable SSH key feature
+ssh_key_source: "string" # Method: "string", "file", or "url"
 ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDGHVdGljVLKyG/hlBDv++NtBsfpw02l5qisUMCQ7L+SP3bLS+/0aB1OpLAgKheyppKyAZ527JZZjc/2ZbC5XKBdTM7FHsnTSg4zWLikx23d9WJIFGCxatQWYRZk6R48iBYth2VfjpWiljJDBIhSUF9iSIFjOcOebAUGVE4Fxy16FkEiSa+e4X4FZmP6N3lUAkmHcPEBAX347gdR9d96E8ShATYI7uwooB/hEcVsa1POrgJW0DxiCA9axxDjZqdHpMHjuLD8flp80CdeMuZRhzLosSSa9UVQJWB9oX9GUlBuZp3YOM9kIQbWUvLkI0CFs1Y0zX9FBjqwpqUBdNtGjcR stratus@stratus-laptop"
-ssh_key_file_path: ""                       # Path to local key file (if source: "file")
-ssh_key_url: ""                             # URL to download key from (if source: "url")
+ssh_key_file_path: "" # Path to local key file (if source: "file")
+ssh_key_url: "" # URL to download key from (if source: "url")
 touchpad_fix: false
 update_fstab: false
 use_archzfs_repo: false
 use_custom_repo: false
 use_luks: false
 use_zfs: false
-username: 'stratus' # FILL ME
-user_password: 'passw0rd'
+username: "stratus" # FILL ME
+user_password: "passw0rd"
 zfs_partition: "" # this is initiated blank
 zfs_partition_names:
-    - mountpoint: "/"
-      name: "zroot/ROOT/default"
-      canmount: "noauto"
-    - mountpoint: "/home"
-      name: "zroot/data/home"
-    - mountpoint: "none"
-      name: "zroot/ROOT"
-    - mountpoint: "none"
-      name: "zroot/data"  
+  - mountpoint: "/"
+    name: "zroot/ROOT/default"
+    canmount: "noauto"
+  - mountpoint: "/home"
+    name: "zroot/data/home"
+  - mountpoint: "none"
+    name: "zroot/ROOT"
+  - mountpoint: "none"
+    name: "zroot/data"
 zfs_root_dataset: "zroot"

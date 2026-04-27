@@ -1,4 +1,3 @@
-
 - name: Install Nvidia Open
   become: true
   become_user: "{{ username }}"
@@ -71,6 +70,7 @@
     name:
       - claude-code
       - opencode-bin
+      - zed
     state: present
   when:
     - desktop | bool
@@ -79,7 +79,7 @@
 - name: Modify Faillock increasing number of failures to {{ faillock_retries }}
   lineinfile:
     path: "/etc/security/faillock.conf"
-    regexp: '^# deny 6'
+    regexp: "^# deny 6"
     line: "deny = {{ faillock_retries }}"
   when:
     - faillock_increase | bool
@@ -120,6 +120,11 @@
       - virt-manager
       - xdg-user-dirs-gtk
       - yt-dlp
+      - alsa-utils
+      - sof-firmware
+      - gnome-sound-recorder
+      - bluez
+      - bluez-utils
     state: present
 
 - name: Ensure a/dev/sg* exists
@@ -135,7 +140,7 @@
     state: directory
     owner: "{{ username }}"
     group: "{{ username }}"
-    mode: '0700'
+    mode: "0700"
 
 - name: Copy bashrc
   copy:
@@ -151,7 +156,7 @@
       file:
         path: /home/{{ username }}/.local/share/applications
         state: directory
-        mode: '0755'
+        mode: "0755"
         owner: "{{ username }}"
         group: "{{ username }}"
 
@@ -159,7 +164,7 @@
       file:
         path: "/home/{{ username }}/.local/share/icons"
         state: directory
-        mode: '0755'
+        mode: "0755"
         owner: "{{ username }}"
         group: "{{ username }}"
 
@@ -167,7 +172,7 @@
       copy:
         src: /usr/share/applications/firefox.desktop
         dest: "/home/{{ username }}/.local/share/applications/firefox.desktop"
-        mode: '0644'
+        mode: "0644"
         owner: "{{ username }}"
         group: "{{ username }}"
 
@@ -175,15 +180,15 @@
       copy:
         src: /mnt/icons/Black-Firefox-icon.png
         dest: "/home/{{ username }}/.local/share/icons/Black-Firefox-icon.png"
-        mode: '0644'
+        mode: "0644"
         owner: "{{ username }}"
         group: "{{ username }}"
 
     - name: Modify Icon path in Firefox desktop file
       lineinfile:
         path: "/home/{{ username }}/.local/share/applications/firefox.desktop"
-        regexp: '^Icon=firefox$'
-        line: 'Icon=/home/{{ username }}/.local/share/icons/Black-Firefox-icon.png'
+        regexp: "^Icon=firefox$"
+        line: "Icon=/home/{{ username }}/.local/share/icons/Black-Firefox-icon.png"
   when:
     - custom_firefox_icon | bool
 - name: Restore firefox backup
@@ -192,7 +197,7 @@
       ansible.builtin.get_url:
         url: http://{{ remote_server }}/system_firefox.tar.gz
         dest: /home/{{ username }}/system_firefox.tar.gz
-        mode: '0664'
+        mode: "0664"
 
     - name: extract system firefox settings tarball
       ansible.builtin.unarchive:
@@ -206,7 +211,7 @@
   file:
     path: "{{ item }}"
     state: directory
-    mode: '0755'
+    mode: "0755"
     owner: "{{ username }}"
     group: "{{ username }}"
   loop:
@@ -231,8 +236,8 @@
 - name: Allow {{ username }} to use systemctl suspend without password
   ansible.builtin.lineinfile:
     path: /etc/sudoers
-    line: '{{ username }} ALL=(ALL) NOPASSWD: /bin/systemctl suspend'
-    validate: '/usr/sbin/visudo -cf %s'
+    line: "{{ username }} ALL=(ALL) NOPASSWD: /bin/systemctl suspend"
+    validate: "/usr/sbin/visudo -cf %s"
     state: present
   when:
     - sudoers_suspend_no_passwd | bool
@@ -243,7 +248,7 @@
       ansible.builtin.get_url:
         url: http://{{ remote_server }}/gpg_ssh_keys.tar.gz
         dest: /tmp/
-        mode: '0664'
+        mode: "0664"
 
     - name: clear out gnupg directory
       ansible.builtin.file:
@@ -260,7 +265,7 @@
       ansible.builtin.get_url:
         url: http://{{ remote_server }}/vpns.tar.gz
         dest: /tmp/
-        mode: '0664'
+        mode: "0664"
 
     - name: Ensure /etc/NetworkManager/system-connections/ exists
       ansible.builtin.file:
@@ -268,7 +273,7 @@
         state: directory
         owner: root
         group: root
-        mode: '0700'
+        mode: "0700"
 
     - name: extract gpg/ssh tarball
       ansible.builtin.unarchive:
@@ -302,7 +307,7 @@
       Include = /etc/pacman.d/endeavouros-mirrorlist
   when:
     - enable_endeavour | bool
-    
+
 - name: Install EndeavourOS keyring
   pacman:
     name: endeavouros-keyring
@@ -315,7 +320,7 @@
   community.general.sudoers:
     name: "{{ username }}_eject"
     user: "{{ username }}"
-    commands: 
+    commands:
       - /usr/bin/eject
       - /usr/bin/eject -t
     nopassword: true
@@ -371,20 +376,19 @@
   set_fact:
     steam_dependencies: >-
       {{ 'lib32-nvidia-utils' if nvidia_dkms or nvidia_lts or nvidia_open else 'lib32-vulkan-intel' }}
-  when: 
+  when:
     - gaming_platform | bool
 
 - name: Install steam and lutris
-  pacman: 
+  pacman:
     name:
       - steam
       - "{{ steam_dependencies }}"
       - lutris
     state: present
     update_cache: true
-  when: 
+  when:
     - gaming_platform | bool
-  
 
 - name: Include Cinnamon tasks
   include_tasks: cinnamon.yaml
@@ -392,11 +396,53 @@
     - desktop | bool
     - desktop_name == "cinnamon"
 
+- name: Install GNOME-specific packages
+  become: true
+  become_user: "{{ username }}"
+  kewlfft.aur.aur:
+    use: yay
+    name:
+      - gnome-bluetooth
+    state: present
+  when:
+    - desktop | bool
+    - desktop_name == "gnome"
+
 - name: Include GNOME tasks
   include_tasks: gnome.yaml
   when:
     - desktop | bool
     - desktop_name == "gnome"
+
+- name: Install port-whisperer via npm
+  npm:
+    name: port-whisperer
+    global: yes
+    state: present
+
+- name: Install and configure reflector
+  block:
+    - name: Install reflector package
+      pacman:
+        name: reflector
+        state: present
+
+    - name: Enable and start reflector service
+      systemd:
+        name: reflector.service
+        enabled: yes
+        state: started
+
+    - name: Configure reflector for optimal mirrors
+      copy:
+        dest: /etc/xdg/reflector/reflector.conf
+        content: |
+          --protocol https
+          --latest 20
+          --number 10
+          --sort rate
+          --save /etc/pacman.d/mirrorlist
+        mode: 0644
 
 - name: Include KDE tasks
   include_tasks: kde.yaml

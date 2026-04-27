@@ -26,7 +26,7 @@
       ansible.builtin.get_url:
         url: "{{ remote_server_url }}/virt-manager.conf"
         dest: /home/{{ local_user }}/.config/virt-manager.dconf
-        mode: '0664'
+        mode: "0664"
 
     - name: Restore Virt-Manager settings from backup
       shell: dconf load /org/virt-manager/ < /home/{{ local_user }}/.config/virt-manager.dconf
@@ -74,40 +74,40 @@
     - name: installing flatpak list A-E
       community.general.flatpak:
         name:
-            - org.audacityteam.Audacity
-            - org.blender.Blender
-            - io.ente.auth
-            - org.angryip.ipscan
-            - com.ultimaker.cura
-            - net.ankiweb.Anki
-            - org.gnome.Cheese
-            - org.gnome.Evince
+          - org.audacityteam.Audacity
+          - org.blender.Blender
+          - io.ente.auth
+          - org.angryip.ipscan
+          - com.ultimaker.cura
+          - net.ankiweb.Anki
+          - org.gnome.Cheese
+          - org.gnome.Evince
         state: present
         method: user
 
     - name: installing flatpak list F-Q
       community.general.flatpak:
         name:
-            - org.freecadweb.FreeCAD
-            - org.gnome.meld
-            - io.mpv.Mpv
-            - org.libreoffice.LibreOffice
-            - fr.handbrake.ghb
-            - com.nextcloud.desktopclient.nextcloud
-            - org.flameshot.Flameshot
-            - ch.openboard.OpenBoard
-            - org.mozilla.firefox
+          - org.freecadweb.FreeCAD
+          - org.gnome.meld
+          - io.mpv.Mpv
+          - org.libreoffice.LibreOffice
+          - fr.handbrake.ghb
+          - com.nextcloud.desktopclient.nextcloud
+          - org.flameshot.Flameshot
+          - ch.openboard.OpenBoard
+          - org.mozilla.firefox
         state: present
         method: user
 
     - name: installing flatpak list R-Z
       community.general.flatpak:
         name:
-            - com.skype.Client
-            - com.spotify.Client
-            - com.visualstudio.code
-            - org.telegram.desktop
-            - com.vivaldi.Vivaldi
+          - com.skype.Client
+          - com.spotify.Client
+          - com.visualstudio.code
+          - org.telegram.desktop
+          - com.vivaldi.Vivaldi
         state: present
         method: user
 
@@ -115,25 +115,25 @@
       ansible.builtin.file:
         path: /home/{{ local_user }}/.var
         state: directory
-        mode: '0755'
+        mode: "0755"
 
     - name: fetch flatpak settings
       ansible.builtin.get_url:
         url: http://{{ remote_server_url }}/flatpak_configs.tar.gz
         dest: /home/{{ local_user }}/.var/flatpak_configs.tar.gz
-        mode: '0664'
+        mode: "0664"
 
     - name: extract Flatpak settings tarball
       ansible.builtin.unarchive:
         src: /home/{{ local_user }}/.var/flatpak_configs.tar.gz
         dest: /home/{{ local_user }}/.var/
-        owner: {{ local_user }}
+        owner: { { local_user } }
 
     - name: fetch flatpak settings
       ansible.builtin.get_url:
         url: "{{ remote_server_url }}/keyrings.tar.gz"
         dest: /home/{{ local_user }}/.local/share/keyrings.tar.gz
-        mode: '0664'
+        mode: "0664"
 
     - name: Install extensions
       ansible.builtin.shell: >
@@ -143,3 +143,40 @@
     - name: Print loop results
       ansible.builtin.debug:
         var: loop_result.stdout_lines
+
+- name: Restore system configurations
+  block:
+    - name: Ensure backup directory exists
+      file:
+        path: /home/{{ local_user }}/backups
+        state: directory
+        mode: "0755"
+
+    - name: Restore dconf settings
+      shell: dconf load / < /home/{{ local_user }}/backups/dconf_backup.conf
+      ignore_errors: yes
+
+    - name: Restore GTK settings
+      copy:
+        src: /home/{{ local_user }}/backups/gtk_settings/
+        dest: /home/{{ local_user }}/.config/
+        owner: { { local_user } }
+        group: { { local_user } }
+      ignore_errors: yes
+
+    - name: Restore application settings
+      copy:
+        src: /home/{{ local_user }}/backups/app_settings/
+        dest: /home/{{ local_user }}/.config/
+        owner: { { local_user } }
+        group: { { local_user } }
+      ignore_errors: yes
+
+    - name: Restore system configuration files
+      copy:
+        src: /home/{{ local_user }}/backups/system_configs/
+        dest: /
+        owner: root
+        group: root
+      ignore_errors: yes
+      become: true
