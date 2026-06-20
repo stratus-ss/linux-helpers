@@ -115,7 +115,9 @@
       - nautilus
       - simple-scan
       - system-config-printer
-      - terminator
+      - ghostty-terminfo
+      - ghostty-shell-integration
+      - ghostty-nautilus
       - ulauncher
       - virt-manager
       - xdg-user-dirs-gtk
@@ -126,6 +128,27 @@
       - bluez
       - bluez-utils
     state: present
+
+- name: Deploy Ghostty configuration
+  block:
+    - name: Ensure Ghostty config directory exists
+      ansible.builtin.file:
+        path: /home/{{ username }}/.config/ghostty
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Copy Ghostty config to user home
+      ansible.builtin.copy:
+        src: /mnt/configs/ghostty_config
+        dest: /home/{{ username }}/.config/ghostty/config
+        remote_src: true
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+  when:
+    - desktop | bool
 
 - name: Ensure a/dev/sg* exists
   ansible.builtin.copy:

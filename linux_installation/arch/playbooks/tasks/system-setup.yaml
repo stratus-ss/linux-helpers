@@ -130,7 +130,7 @@
       - openssh
       - rsync
       - sudo
-      - terminator
+      - ghostty
       - wget
       - xfsprogs
     state: present
