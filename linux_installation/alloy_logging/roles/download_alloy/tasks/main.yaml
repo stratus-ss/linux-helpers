@@ -1,5 +1,5 @@
 # Download Alloy Binary
-# Determine the latest version of Alloy
+# Determine the latest version of Alloy (run from control node since target may lack internet egress)
 - name: Determine Latest Alloy Version
   uri:
     url: https://api.github.com/repos/grafana/alloy/releases/latest
@@ -7,6 +7,8 @@
     return_content: yes
   register: github_release
   changed_when: false
+  delegate_to: localhost
+  become: false
 
 # Set version from GitHub API response
 - name: Set Alloy Version
@@ -76,10 +78,19 @@
     alloy_download_url: "https://github.com/grafana/alloy/releases/download/{{ alloy_version }}/alloy-linux-{{ alloy_arch }}.zip"
   when: not versions_match
 
-# Download Alloy Binary (only if versions don't match)
-- name: Download Alloy Binary
+# Download Alloy Binary (only if versions don't match) - from control node, then push to target
+- name: Download Alloy Binary to control node
   get_url:
     url: "{{ alloy_download_url }}"
+    dest: "/tmp/alloy-linux-{{ alloy_arch }}.zip"
+    mode: '0644'
+  when: not versions_match
+  delegate_to: localhost
+  become: false
+
+- name: Copy Alloy zip to target host
+  copy:
+    src: "/tmp/alloy-linux-{{ alloy_arch }}.zip"
     dest: "/tmp/alloy-linux-{{ alloy_arch }}.zip"
     mode: '0644'
   when: not versions_match

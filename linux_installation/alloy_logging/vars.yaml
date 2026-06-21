@@ -10,22 +10,21 @@ alloy_workdir: "/var/lib/alloy"
 alloy_metrics_port: 12345
 
 # ====== LOKI CONNECTION ======
-# UPDATE THESE for your environment
-loki_host: "loki.example.com" 
+loki_host: "containers.x86experts.com"
 loki_host_port: 3100
 
 # ====== LOG COLLECTION SETTINGS ======
 # Enable/disable specific log types
 host:
   auth_log: true      # /var/log/auth.log
-  kernel_log: true    # /var/log/kern.log  
+  kernel_log: true    # /var/log/kern.log
   messages_log: true  # /var/log/messages
   syslog_log: true    # /var/log/syslog
   misc_log: true      # /var/log/*.log
 
 # ====== DNS LOGGING CONFIGURATION ======
-# Enable NetworkManager dnsmasq for DNS query logging
-log_dns: true
+# Disable for desktop hosts (timee-budgie is a Fedora Atomic desktop, not a DNS server)
+log_dns: false
 
 # ====== ALLOY PERFORMANCE SETTINGS ======
 alloy_config_settings:
@@ -59,4 +58,4 @@ alloy_env_vars:
 external_labels:
   agent_version: "alloy"
   deployment_type: "bare-metal"
-  environment: "production"  # Change as needed (dev, staging, prod)
+  environment: "home-lab"  # matches central Alloy label convention (home-lab)

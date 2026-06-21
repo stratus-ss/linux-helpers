@@ -5,9 +5,9 @@
   "alloy_workdir": "/var/lib/alloy",
   "alloy_metrics_port": 12345,
   
-  "loki_host": "loki.example.com",
+  "loki_host": "containers.x86experts.com",
   "loki_host_port": 3100,
-  
+
   "host": {
     "auth_log": true,
     "kernel_log": true,
@@ -15,8 +15,8 @@
     "syslog_log": true,
     "misc_log": true
   },
-  
-  "log_dns": true,
+
+  "log_dns": false,
   
   "alloy_config_settings": {
     "max_segment_age": "168h",
@@ -41,6 +41,6 @@
   "external_labels": {
     "agent_version": "alloy",
     "deployment_type": "bare-metal",
-    "environment": "production"
+    "environment": "home-lab"
   }
 }

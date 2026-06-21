@@ -1,0 +1,25 @@
+[alloy_hosts]
+192.168.200.77 ansible_user=stratus
+192.168.200.55 ansible_user=stratus
+192.168.200.63 ansible_user=stratus
+192.168.200.51 ansible_user=stratus
+192.168.99.9 ansible_user=root
+192.168.200.82 ansible_user=stratus ansible_become=yes ansible_become_method=sudo
+
+
+
+
+# Optional: DNS logging group (requires log_dns: true in vars)
+[log_dns]
+192.168.200.77 ansible_user=stratus
+192.168.200.55 ansible_user=stratus
+192.168.200.63 ansible_user=stratus
+192.168.200.51 ansible_user=stratus
+
+
+[alloy_hosts:vars]
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+# Authentication:
+# - Recommended: use key-based SSH (ssh-agent) and omit ansible_ssh_pass entirely
+# - For password auth, set ANSIBLE_BECOME_PASSWORD (or use --ask-pass / --ask-become-pass)
+# - Never commit plaintext passwords to a public repo
