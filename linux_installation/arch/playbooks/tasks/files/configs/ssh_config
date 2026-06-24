@@ -1,0 +1,7 @@
+# SSH client configuration — deployed during Arch Linux installation
+# Located at ~/.ssh/config on target machine
+
+Host *
+    IdentityFile ~/.ssh/id_ed25519
+    IdentityFile ~/.ssh/id_rsa
+    SetEnv TERM=xterm-256color

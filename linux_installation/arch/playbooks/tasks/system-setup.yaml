@@ -33,6 +33,16 @@
   include_tasks: setup-ssh-key.yaml
   when: add_ssh_key | bool
 
+- name: Deploy SSH client config
+  ansible.builtin.copy:
+    src: configs/ssh_config
+    dest: "/home/{{ username }}/.ssh/config"
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0644"
+  when:
+    - desktop | bool
+
 - name: Enable wheel group in sudoers
   lineinfile:
     path: /etc/sudoers
@@ -130,7 +140,6 @@
       - openssh
       - rsync
       - sudo
-      - ghostty
       - wget
       - xfsprogs
     state: present

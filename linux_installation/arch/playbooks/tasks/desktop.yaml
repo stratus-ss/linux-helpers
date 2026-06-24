@@ -115,6 +115,7 @@
       - nautilus
       - simple-scan
       - system-config-printer
+      - ghostty
       - ghostty-terminfo
       - ghostty-shell-integration
       - ghostty-nautilus
