@@ -47,6 +47,15 @@ model:
   input_pixel_format: bgr
   model_type: ssd
 
+# birdseye is OFF, and that is a CPU decision, not a cosmetic one. Frigate
+# enables it by default, and its composer spawns one mpeg1video encoder PER
+# CAMERA plus one for the composite -- an encoder with no hardware path, so 11
+# pure-CPU processes running continuously whether or not anyone has the
+# birdseye view open. Measured 2026-11-18 on this host: 12 such processes and
+# roughly 140% of one core, for a view nobody was watching.
+birdseye:
+  enabled: false
+
 detect:
   enabled: {{ arc_b70_frigate_detect_enabled }}
 

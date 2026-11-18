@@ -147,21 +147,33 @@
 # Without the first, MSE is unavailable and the UI falls back to jsmpeg, which
 # spawns a CPU mpeg1video re-encoder per viewer per camera. Without the second,
 # the camera has no stream at all and reports camera_fps: 0.
-- name: Assert every camera consumes a go2rtc restream
+- name: Assert every camera input is a local restream
   ansible.builtin.assert:
     that:
       - (frigate_rendered.content | b64decode | from_yaml).cameras | dict2items
         | map(attribute='value.ffmpeg.inputs') | flatten | map(attribute='path')
         | reject('match', '^rtsp://127\.0\.0\.1:8554/') | list | length == 0
-      - (frigate_rendered.content | b64decode | from_yaml).go2rtc.streams | length
-        == (frigate_rendered.content | b64decode | from_yaml).cameras | length
-      - (frigate_rendered.content | b64decode | from_yaml).go2rtc.streams.keys() | sort
-        == (frigate_rendered.content | b64decode | from_yaml).cameras.keys() | sort
     fail_msg: >-
-      Camera inputs must all be rtsp://127.0.0.1:8554/<name> and there must be
-      one go2rtc stream per camera. Inputs:
+      Every camera input must be rtsp://127.0.0.1:8554/<stream>. Inputs:
       {{ (frigate_rendered.content | b64decode | from_yaml).cameras | dict2items | map(attribute='value.ffmpeg.inputs') | flatten | map(attribute='path') | list }}
     quiet: true
+
+# One MAIN stream (what MSE passes to the browser) and one SUB stream (what the
+# detect ffmpeg decodes) per camera. A missing _sub means detection would decode
+# the full-resolution main profile, which is what made this host cost ~22% CPU
+# per camera.
+- name: Assert every camera has both a main and a sub go2rtc stream
+  ansible.builtin.assert:
+    that:
+      - item in (frigate_rendered.content | b64decode | from_yaml).go2rtc.streams
+      - (item ~ '_sub') in (frigate_rendered.content | b64decode | from_yaml).go2rtc.streams
+    fail_msg: >-
+      Camera {{ item }} is missing a go2rtc stream (needs both {{ item }} and
+      {{ item }}_sub). Defined: {{ (frigate_rendered.content | b64decode | from_yaml).go2rtc.streams.keys() | list }}
+    quiet: true
+  loop: "{{ (frigate_rendered.content | b64decode | from_yaml).cameras.keys() | list }}"
+  loop_control:
+    label: "{{ item }}"
 
 # findmnt prints the SOURCE DEVICE, not the filesystem label: asserting on the
 # XFS label arc_data would fail on a correct system.
@@ -240,6 +252,19 @@
 # the running container's config against the file on disk is the only signal
 # that cannot go stale.
 #
+# The first condition is the direct one: if the template task reports changed,
+# the file on disk differs from what the container was started with, so recreate.
+# The conditions after it catch the case the comment above describes -- a config
+# that changed without the template noticing -- and they are cheap.
+#
+# It was added on 2026-11-18, after the cameras were re-pointed from <name> to
+# <name>_sub: every input still matched ^rtsp://127.0.0.1:8554/, the camera
+# count was unchanged, and the role reported changed=0 while the container kept
+# decoding full-resolution main for detection.
+#
+# That is why the _sub invariant is its own condition: "is a local restream" was
+# true both before and after the switch, so it could not see the difference.
+#
 # Every camera must reach its stream THROUGH go2rtc (rtsp://127.0.0.1:8554/),
 # and that is one of the compared fields for a concrete reason: on 2026-11-18
 # the cameras were re-pointed from direct RTSP to restreams, the file on disk
@@ -267,7 +292,8 @@
     chdir: "{{ arc_b70_frigate_dir }}"
   register: arc_b70_frigate_up
   when: >-
-    arc_b70_frigate_state.rc != 0
+    arc_b70_frigate_config_result.changed | default(false)
+    or arc_b70_frigate_state.rc != 0
     or 'running' not in arc_b70_frigate_state.stdout
     or arc_b70_frigate_running_config.status | default(0) != 200
     or (arc_b70_frigate_running_config.json.detectors | default({}) | length) != 1
@@ -276,6 +302,9 @@
     or (arc_b70_frigate_running_config.json.cameras | default({}) | dict2items
         | map(attribute='value.ffmpeg.inputs') | flatten | map(attribute='path')
         | reject('match', '^rtsp://127\\.0\\.0\\.1:8554/') | list | length) > 0
+    or (arc_b70_frigate_running_config.json.cameras | default({}) | dict2items
+        | map(attribute='value.ffmpeg.inputs') | flatten | map(attribute='path')
+        | reject('match', '_sub$') | list | length) > 0
   changed_when: true
 
 - name: Wait for Frigate to answer
