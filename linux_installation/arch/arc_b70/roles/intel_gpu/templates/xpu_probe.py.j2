@@ -1,0 +1,11 @@
+# Throwaway probe: proves torch.xpu sees the B70 before any app venv is built.
+import sys
+
+import torch
+
+if not torch.xpu.is_available():
+    sys.exit("XPU NOT AVAILABLE — check intel-compute-runtime / level-zero-loader")
+props = torch.xpu.get_device_properties(0)
+print(f"torch {torch.__version__}")
+print(f"xpu:0 {props.name}")
+print(f"total_memory {props.total_memory // (1024 * 1024)} MiB")

@@ -1,0 +1,39 @@
+This repository contains a patch to Fish Audio's fish-speech software:
+
+  patches/fish-speech-xpu.patch
+    Target: https://github.com/fishaudio/fish-speech commit 214da3cd841bda85da2496b96cd3c4d7edb1337e
+    Files changed: fish_speech/models/text2semantic/llama.py, fish_speech/models/text2semantic/inference.py
+
+  patches/fish-speech-api-xpu.patch
+    Target: https://github.com/fishaudio/fish-speech commit 214da3cd841bda85da2496b96cd3c4d7edb1337e
+    Files changed: tools/server/api_utils.py, tools/server/model_manager.py, tools/server/model_utils.py,
+      fish_speech/inference_engine/reference_loader.py
+
+  patches/fish-speech-webui-xpu.patch
+    Target: https://github.com/fishaudio/fish-speech commit 214da3cd841bda85da2496b96cd3c4d7edb1337e
+    Files changed: tools/run_webui.py
+
+  This model is licensed under the Fish Audio Research License, Copyright © 39 AI, INC. All Rights Reserved.
+
+  The patch is a modification of the Fish Audio Materials, distributed under the Fish Audio Research License
+  (copy in patches/LICENSE-FISH-AUDIO.md). Changes, all for running on Intel XPU (Arc B70):
+  - inference.py: use torch.accelerator synchronize instead of CUDA-only calls; allow the inductor backend on XPU.
+  - llama.py: torch.where instead of a boolean-mask assignment (no host sync, graph-capturable); an opt-out of the
+    async input_pos check for graph-captured decoding; an optional per-row key mask for batched decoding with
+    left-padded prompts; an optional sub-vocabulary output head (semantic tokens + <|im_end|>); single-query GQA
+    attention without repeat_interleave.
+  - api_utils.py / model_manager.py: select the XPU when it is available, and honour an explicitly requested
+    device instead of overwriting it; the --device default follows torch.xpu.is_available().
+  - model_utils.py: target the autocast context at the XPU instead of the hard-coded "cuda".
+  - reference_loader.py: read reference audio through soundfile, because torchaudio >= 2.9 routes every backend
+    through torchcodec and torchcodec ships only a CUDA build.
+  - run_webui.py: the WebUI's own device selection honours an explicit request, and the Gradio server binds an
+    explicit address (--listen) instead of Gradio's 0.0.0.0:7860 default.
+
+The scripts in fish/ follow fish-speech internals (prompt building, sampling, encode_audio) and are also
+distributed under the Fish Audio Research License.
+
+Built with Fish Audio.
+
+Qwen3-TTS (pip package qwen-tts 0.1.1 and the Qwen/Qwen3-TTS-12Hz-1.7B-* weights) is used unmodified, under the
+Apache License 2.0.

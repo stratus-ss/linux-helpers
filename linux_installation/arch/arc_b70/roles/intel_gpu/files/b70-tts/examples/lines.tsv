@@ -1,0 +1,9 @@
+# out_name<TAB>voice<TAB>text[<TAB>ref_text]. voice = name in --voices-dir or a wav path; ref_text defaults to <voice>.txt
+narrator-01	narrator	The train to the coast leaves at nine, so pack light and bring a warm coat.
+narrator-02	narrator	If you follow the river north for about an hour, you'll reach the old stone bridge.
+narrator-03	narrator	When the lights came back on, the room was empty and the window was wide open.
+bright-01	bright	Thanks for calling. Everyone is busy right now, but your call matters to us.
+bright-02	bright	The recipe is simple: flour, water, salt, and a lot of patience.
+bright-03	bright	Let's take a short break and meet back here in ten minutes.
+bright-whisper	bright	[whispering] Keep your voice down. Everyone else is still asleep.
+narrator-laugh	narrator	[laughing] I checked the numbers twice, and they still don't add up!

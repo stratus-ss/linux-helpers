@@ -1,0 +1,345 @@
+---
+# intel_gpu — makes torch.xpu work on the B70, and formats/mounts the local
+# application disk.
+#
+# Order is load-bearing: the data device is formatted and mounted BEFORE the
+# probe venv is created, because the venv lives under the mounted tree.
+
+- name: Ensure GPU user-space packages present
+  ansible.builtin.pacman:
+    name:
+      - intel-compute-runtime
+      - level-zero-loader
+      - intel-graphics-compiler
+      - intel-media-driver
+      - intel-gpu-tools
+      - libva
+      - vulkan-icd-loader
+      - vulkan-intel
+      - vulkan-tools
+      - mesa
+    state: present
+
+- name: Verify the xe kernel driver is bound
+  ansible.builtin.command:
+    cmd: lspci -nnk -s 0000:08:00.0
+  register: arc_b70_lspci
+  changed_when: false
+  failed_when: "'Kernel driver in use: xe' not in arc_b70_lspci.stdout"
+
+# The GID is a runtime fact, not a group_vars lookup: Ansible ships no stat
+# lookup plugin, so lookup('stat', ...) fails at template time.
+- name: Resolve the render device group id
+  ansible.builtin.command:
+    cmd: stat -c '%g' /dev/dri/renderD128
+  register: arc_b70_render_gid_result
+  changed_when: false
+  failed_when: arc_b70_render_gid_result.rc != 0
+
+- name: Record the render device group id
+  ansible.builtin.set_fact:
+    arc_b70_render_gid: "{{ arc_b70_render_gid_result.stdout | trim }}"
+
+# The format must never re-run against a mounted filesystem. Step 3a reads the
+# device's filesystem type; 3b formats only when the device carries none.
+- name: Check whether the data device already carries a filesystem
+  ansible.builtin.command:
+    cmd: "blkid -o value -s TYPE {{ arc_b70_data_device }}"
+  register: arc_b70_data_blkid
+  check_mode: false
+  changed_when: false
+  failed_when: false
+
+# DESTRUCTIVE, and operator-gated (see the plan's Task 5 STOP RULE). The
+# operator formatted /dev/sdc1 themselves (single partition, whole 223.6 GB
+# disk, mkfs.xfs -m reflink=1,crc=1), so the type guard below normally
+# skips this task and the mount reuses the existing filesystem.
+#
+# The guard tests the TYPE, not blkid's exit code: blkid -o value -s TYPE
+# exits 0 on an unformatted-but-signed device, and an exit-code guard would
+# skip the format and then fail the mount with "wrong fs type".
+- name: Format the application data device
+  ansible.builtin.command:
+    cmd: "mkfs.xfs -f -m reflink=1,crc=1 -L arc_data {{ arc_b70_data_device }}"
+  when: (arc_b70_data_blkid.stdout | default('') | trim) != 'xfs'
+  changed_when: true
+
+# state: mounted writes the fstab entry AND mounts; its opts string is the single
+# source of the mount options. No separate fstab task -- two writers would
+# disagree on passno and report changed on every run.
+#
+# The mount point is re-pointed when the source device changes (the operator
+# moved the application data from /dev/sdb1 to /dev/sdc1). The mount module
+# updates the fstab entry but leaves the old source mounted, so unmount the
+# stale one first or the old filesystem keeps serving /opt/arc.
+- name: Read the current source mounted at the data mount point
+  ansible.builtin.command:
+    cmd: "findmnt -n -o SOURCE --target {{ arc_b70_data_mount }}"
+  register: arc_b70_stale_mount
+  check_mode: false
+  changed_when: false
+  failed_when: false
+
+- name: Unmount the stale application data device
+  ansible.builtin.command:
+    cmd: "umount {{ arc_b70_data_mount }}"
+  register: arc_b70_stale_unmount
+  changed_when: arc_b70_stale_unmount.rc == 0
+  failed_when: false
+  when: arc_b70_stale_mount.stdout is defined and arc_b70_stale_mount.stdout | trim != '' and arc_b70_stale_mount.stdout | trim != arc_b70_data_device
+
+- name: Mount the application data device
+  ansible.builtin.mount:
+    path: "{{ arc_b70_data_mount }}"
+    src: "{{ arc_b70_data_device }}"
+    fstype: xfs
+    opts: defaults,noatime
+    state: mounted
+
+- name: Install uv
+  ansible.builtin.shell:
+    cmd: curl -LsSf https://astral.sh/uv/install.sh | sh
+    creates: "{{ arc_b70_uv_bin }}"
+  environment:
+    HOME: /root
+    UV_INSTALL_DIR: /root/.local/bin
+
+# The vendor step below rewrites tts/setup.sh inside this checkout, so from
+# the second run onward git sees a modified tracked file and
+# ansible.builtin.git refuses to reconcile it (force: no) or hard-resets it
+# (force: yes, which discards the vendored tree and reports changed every
+# run, so Task 16's changed=0 acceptance could never be met).
+#
+# So the clone is guarded by the checkout's actual commit. When the pinned
+# commit is already checked out, nothing is touched.
+- name: Check whether the B70 reference checkout is already at the pinned commit
+  ansible.builtin.command:
+    cmd: "git rev-parse HEAD"
+    chdir: "{{ arc_b70_b70_ref_dir }}"
+  register: arc_b70_b70_ref_head
+  check_mode: false
+  changed_when: false
+  failed_when: false
+
+- name: Clone the B70 reference repo
+  ansible.builtin.git:
+    repo: https://github.com/horvay/b70.git
+    dest: "{{ arc_b70_b70_ref_dir }}"
+    version: "{{ arc_b70_b70_ref_commit }}"
+    depth: 1
+  when: arc_b70_b70_ref_head.stdout | default('') | trim != arc_b70_b70_ref_commit
+
+# src is role-relative: Ansible resolves copy: src against the role's files/
+# directory, so b70-tts/ means roles/intel_gpu/files/b70-tts/. Not remote_src --
+# that would be a self-copy onto the host's own clone.
+- name: Vendor the TTS subtree
+  ansible.builtin.copy:
+    src: b70-tts/
+    dest: "{{ arc_b70_b70_ref_dir }}/tts/"
+    mode: '0644'
+
+- name: Create the XPU probe venv
+  ansible.builtin.command:
+    cmd: "{{ arc_b70_uv_bin }} venv --python {{ arc_b70_xpu_python }} {{ arc_b70_probe_dir }}"
+    creates: "{{ arc_b70_probe_dir }}/bin/python"
+
+# The requirements file is present because the vendor task already deployed it.
+# changed_when: false -- pip reports "Installed N packages" even when nothing
+# changed; the probe in the last task is the assertion.
+- name: Install the XPU torch wheels
+  ansible.builtin.command:
+    cmd: "{{ arc_b70_uv_bin }} pip install --python {{ arc_b70_probe_dir }}/bin/python --index-url https://download.pytorch.org/whl/xpu -r {{ arc_b70_b70_ref_dir }}/tts/requirements/xpu-torch.txt"
+  changed_when: false
+
+- name: Deploy the XPU probe script
+  ansible.builtin.template:
+    src: xpu_probe.py.j2
+    dest: "{{ arc_b70_probe_dir }}/probe.py"
+    mode: '0644'
+
+- name: Run the XPU probe
+  ansible.builtin.command:
+    cmd: "{{ arc_b70_probe_dir }}/bin/python {{ arc_b70_probe_dir }}/probe.py"
+  register: arc_b70_xpu_probe
+  changed_when: false
+
+# -- the shared XPU base image (containerization plan, Task 1) ---------------
+#
+# The two app images (ComfyUI, FishTTS) need the same Intel userspace that
+# pip cannot supply: the Level Zero loader and the NEO Level Zero driver.
+# Building it once means the driver version is defined in one place and
+# provably matches the host's -- both packages come from Arch's `extra` repo,
+# which is where the host installs them from.
+#
+# The build context lives on the HOST, not in the repo: linux-helpers is not
+# present on kids-server, and a build context is a path on the machine running
+# the daemon. The role renders the recipe there and builds with that path as
+# the context -- the same shape the ebook2audiobook role already uses.
+
+- name: Ensure the XPU base image build context is present
+  ansible.builtin.file:
+    path: "{{ arc_b70_xpu_base_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Deploy the XPU base image recipe
+  ansible.builtin.copy:
+    src: xpu-base/Dockerfile
+    dest: "{{ arc_b70_xpu_base_dir }}/Dockerfile"
+    mode: '0644'
+
+# The recipe is identified by the checksum of the file that determines it, so
+# "is the image current?" is one label lookup. Without this, the guard below
+# (the image's presence) cannot tell a current image from a stale one: the
+# tag does not change when the image is rebuilt under it, so a stale image
+# looks present and the build is skipped forever.
+- name: Compute the build recipe checksum
+  ansible.builtin.stat:
+    path: "{{ arc_b70_xpu_base_dir }}/Dockerfile"
+    checksum_algorithm: sha256
+  register: arc_b70_xpu_base_recipe_files
+
+- name: Record the build recipe checksum
+  ansible.builtin.set_fact:
+    # Hashed, not concatenated: a label value has to be a single shell token.
+    # The parentheses matter -- without them the | hash filter binds to the
+    # first term alone and every earlier term is passed through verbatim.
+    arc_b70_xpu_base_recipe: >-
+      {{ (arc_b70_xpu_base_recipe_files.stat.checksum
+          ~ arc_b70_xpu_base_image)
+         | hash('sha256') }}
+
+- name: Read the build recipe label from the current image
+  ansible.builtin.command:
+    cmd: >-
+      docker image inspect --format
+      '{{ '{{' }} index .Config.Labels "org.arcb70.recipe" {{ '}}' }}'
+      {{ arc_b70_xpu_base_image }}
+  register: arc_b70_xpu_base_image_recipe
+  changed_when: false
+  failed_when: false
+
+- name: Check whether the XPU base image already exists
+  ansible.builtin.command:
+    cmd: "docker image inspect {{ arc_b70_xpu_base_image }}"
+  register: arc_b70_xpu_base_image_state
+  changed_when: false
+  failed_when: false
+
+# Assert the registry is usable BEFORE naming an image after it. The registry
+# serves PLAIN HTTP on port 5000, so the daemon must list it under
+# insecure-registries; without that the build and the push fail with
+# "server gave HTTP response to HTTPS client" -- a message that says nothing
+# about the real cause.
+- name: Read the daemon's insecure registries
+  ansible.builtin.command:
+    cmd: docker info --format '{{ '{{' }}json .RegistryConfig.InsecureRegistryCIDRs{{ '}}' }}{{ '{{' }}json .RegistryConfig.IndexConfigs{{ '}}' }}'
+  register: arc_b70_registry_info
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Assert the B70 registry is usable from this daemon
+  ansible.builtin.assert:
+    that:
+      - "'containers.x86experts.com:5000' in arc_b70_registry_info.stdout"
+    fail_msg: >-
+      The daemon does not know containers.x86experts.com:5000 as an insecure
+      registry. The registry serves plain HTTP on port 5000, so add
+      {"insecure-registries": ["containers.x86experts.com:5000"]} to
+      /etc/docker/daemon.json and restart docker. Without it every build that
+      FROMs the base image and every push fails with "server gave HTTP response
+      to HTTPS client", which does not point at the cause.
+    quiet: true
+
+# The registry serves PLAIN HTTP on port 5000 and is listed in the daemon's
+# insecure-registries, so this push needs no credential. Over https:// it
+# fails with "server gave HTTP response to HTTPS client" before auth is ever
+# reached.
+#
+# The build writes its own log rather than returning its output to Ansible.
+# A docker build's output is large and, without --progress=plain, is a stream
+# of carriage-return progress lines that Ansible buffers in full. The log is
+# also worth having: every image defect on this host was diagnosed from a
+# build log, not from a summary.
+- name: Build the XPU base image
+  ansible.builtin.shell:
+    cmd: >-
+      docker build
+      --progress=plain
+      --label "org.arcb70.recipe={{ arc_b70_xpu_base_recipe }}"
+      -t {{ arc_b70_xpu_base_image }}
+      . > {{ arc_b70_xpu_base_build_log }} 2>&1
+    chdir: "{{ arc_b70_xpu_base_dir }}"
+    executable: /bin/bash
+  when: >-
+    arc_b70_xpu_base_image_state.rc != 0
+    or arc_b70_xpu_base_image_recipe.stdout | trim != arc_b70_xpu_base_recipe | trim
+  changed_when: true
+
+- name: Report where the build log is
+  ansible.builtin.debug:
+    msg: "XPU base image build log: {{ arc_b70_xpu_base_build_log }}"
+
+# The base is PUSHED, not only built. The two app images FROM it by this
+# registry name, so a base that exists only as a local tag cannot be
+# resolved by a build on a clean daemon.
+# The push must NOT be gated on the build condition alone. "The image changed"
+# and "the image is in the registry" are different facts -- an image built by
+# hand, or a registry that lost the repo, leaves a matching label, so a
+# build-gated push is skipped forever while the local image advertises a
+# RepoDigest the registry answers 404 for (measured on this host 2026-11-17 for
+# arc-b70/comfyui). Read the registry's own tag list and push when it is absent.
+- name: Read the registry's tags for the xpu_base repository
+  ansible.builtin.command:
+    cmd: >-
+      curl -s --max-time 20
+      http://containers.x86experts.com:5000/v2/arc-b70/xpu-base/tags/list
+  register: arc_b70_xpu_base_registry_tags
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Record whether that tag is already in the registry
+  ansible.builtin.set_fact:
+    arc_b70_xpu_base_in_registry: >-
+      {{ (arc_b70_xpu_base_registry_tags.stdout | default(''))
+         is search('"' ~ (arc_b70_xpu_base_image | regex_replace('^.*:', '')) ~ '"') }}
+
+- name: Push the XPU base image to the registry
+  ansible.builtin.command:
+    cmd: "docker push {{ arc_b70_xpu_base_image }}"
+  register: arc_b70_xpu_base_push
+  changed_when: true
+  when: >-
+    not arc_b70_xpu_base_in_registry | bool
+    or arc_b70_xpu_base_image_state.rc != 0
+    or arc_b70_xpu_base_image_recipe.stdout | trim != arc_b70_xpu_base_recipe | trim
+
+# The assertion that proves the image carries the driver it claims. It reads
+# the container's own package database and its own loader file -- not a value
+# written elsewhere -- so an image that silently lost the driver fails here
+# rather than at the first GPU call.
+- name: Assert the XPU base image carries the Level Zero stack
+  ansible.builtin.command:
+    cmd: >-
+      docker run --rm --entrypoint sh {{ arc_b70_xpu_base_image }} -c
+      'pacman -Q level-zero-loader intel-compute-runtime &&
+       ls -l /usr/lib/libze_loader.so /usr/lib/libze_intel_gpu.so.1'
+  register: arc_b70_xpu_base_check
+  changed_when: false
+  failed_when: arc_b70_xpu_base_check.rc != 0
+
+# The GPU must be visible to a container. This is the one check that proves
+# the base image can actually reach the card -- the package assertions above
+# only prove the userspace is present.
+- name: Assert the XPU base image sees the render device
+  ansible.builtin.command:
+    cmd: >-
+      docker run --rm --device /dev/dri --group-add {{ arc_b70_render_gid }}
+      --entrypoint sh {{ arc_b70_xpu_base_image }} -c 'ls /dev/dri'
+  register: arc_b70_xpu_base_dri
+  changed_when: false
+  failed_when: >-
+    arc_b70_xpu_base_dri.rc != 0
+    or 'renderD128' not in arc_b70_xpu_base_dri.stdout

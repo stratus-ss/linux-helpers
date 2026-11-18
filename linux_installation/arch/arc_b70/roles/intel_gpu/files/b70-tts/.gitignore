@@ -1,0 +1,15 @@
+# environments and caches
+.venv*/
+__pycache__/
+*.pyc
+.cache/
+# upstream checkout and model weights (see setup.sh)
+fish-speech/
+checkpoints/
+models/
+*.safetensors
+*.pth
+*.bin
+# generated audio and logs
+out/
+*.log

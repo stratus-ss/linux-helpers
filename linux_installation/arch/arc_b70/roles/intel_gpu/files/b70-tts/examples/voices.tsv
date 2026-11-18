@@ -1,0 +1,3 @@
+# name<TAB>description[<TAB>text the voice reads]. Without a text, every voice reads qwen_b70.DEFAULT_TEXT.
+narrator	A calm middle-aged man with a deep, warm voice, speaking slowly and clearly like an audiobook narrator.
+bright	A cheerful young woman with a bright, clear voice, speaking with energy and a smile, like a morning radio host.
