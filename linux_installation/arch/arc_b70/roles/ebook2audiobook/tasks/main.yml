@@ -1,0 +1,259 @@
+---
+# ebook2audiobook -- XTTS-v2 on torch.xpu.
+#
+# The image is built from the pinned upstream source on an ARCH base, from a
+# recipe the role owns (templates/Dockerfile.arch.j2). This is not a
+# preference: it is the only way the container can see this card.
+#
+# Measured on the host, 2026-11-17, for a Battlemage Pro B70 (8086:E223, xe):
+#
+#   Debian 12 bookworm  intel-opencl-icd       22.43.24595.41  no L0 driver
+#   Intel apt (jammy/noble) libze-intel-gpu1   25.18.33578.15  0 BMG strings
+#   Arch rolling        intel-compute-runtime  26.40.40196.8   names the B70
+#
+# Intel's apt repositories top out at 25.18 for both suites, and anything newer
+# needs glibc >= 2.38 -- bookworm has 2.36. In the Debian image the outcome was
+# a correct +xpu torch reporting "XPU device count is zero", with zeInit
+# returning ZE_RESULT_ERROR_UNINITIALIZED: the driver was present and did not
+# know the card. Arch carries the runtime the working host runs.
+#
+# Upstream issue #2055 is the other trap: the published xpu compose profile
+# forwarded DEVICE_TAG but not DOCKER_DEVICE_STR, so the image shipped torch
+# that could not use the GPU and fell back silently. Both are passed here, and
+# the role asserts the running container really has a usable XPU.
+
+- name: Resolve the render device group id
+  ansible.builtin.command:
+    cmd: stat -c '%g' /dev/dri/renderD128
+  register: arc_b70_render_gid_result
+  changed_when: false
+  failed_when: arc_b70_render_gid_result.rc != 0
+
+- name: Record the render device group id
+  ansible.builtin.set_fact:
+    arc_b70_render_gid: "{{ arc_b70_render_gid_result.stdout | trim }}"
+
+- name: Ensure the ebook2audiobook application tree is present
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ arc_b70_e2a_dir }}"
+    - "{{ arc_b70_e2a_build_context }}"
+
+# Upstream's container writes models, voices and output into these paths. The
+# host side is created here so the mounts are real directories owned by root
+# rather than whatever docker invents on first start.
+- name: Ensure the ebook2audiobook data directories are present
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ arc_b70_e2a_ebooks }}"
+    - "{{ arc_b70_e2a_audiobooks }}"
+    - "{{ arc_b70_e2a_models }}"
+    - "{{ arc_b70_e2a_voices }}"
+    - "{{ arc_b70_e2a_tmp }}"
+
+# The checkout is dirty by design: the role writes its own Dockerfile into it
+# (Dockerfile.arc_b70, an untracked file). ansible.builtin.git cannot reconcile
+# a dirty checkout -- it fails on a modified TRACKED file -- so the clone is
+# guarded on the pinned SHA instead. The checkout is never re-cloned or reset,
+# so the role's file survives.
+- name: Read the pinned commit of the existing checkout
+  ansible.builtin.command:
+    cmd: "git rev-parse HEAD"
+    chdir: "{{ arc_b70_e2a_build_context }}"
+  register: arc_b70_e2a_head
+  changed_when: false
+  failed_when: false
+
+- name: Clone the upstream source at the pinned commit
+  ansible.builtin.git:
+    repo: "{{ arc_b70_e2a_source }}"
+    dest: "{{ arc_b70_e2a_build_context }}"
+    version: "{{ arc_b70_e2a_commit }}"
+    depth: 1
+    force: false
+  when: arc_b70_e2a_head.rc != 0 or arc_b70_e2a_head.stdout | trim != arc_b70_e2a_commit
+
+# The image recipe is a file the role owns, NOT a patch applied to upstream's
+# Debian Dockerfile. Upstream's Dockerfile builds a Debian bookworm image, and
+# no Debian/Ubuntu packaging of Intel's Level Zero driver supports Battlemage:
+# Intel's apt repos stop at 25.18 for both jammy and noble, Debian 12 ships
+# 22.43 with no L0 driver at all, and newer builds need glibc >= 2.38 which
+# bookworm (2.36) lacks. Patching that file could only ever produce an image
+# whose driver does not know the card -- which is exactly what happened: a
+# correct +xpu torch reported "XPU device count is zero" while zeInit returned
+# ZE_RESULT_ERROR_UNINITIALIZED.
+#
+# Arch rolling carries compute-runtime 26.40, the version the working host
+# runs, so the recipe is built on archlinux:base. See
+# templates/Dockerfile.arch.j2 for the measurements.
+#
+# This also removes two earlier layers of accidental complexity: the index ENV
+# injection and the post-hoc "force the XPU wheels last" block existed only
+# because upstream's own installer made the losing torch resolve. With the
+# install order under the role's control, the Dockerfile orders it correctly
+# and still asserts the result in-image.
+- name: Deploy the Arch image recipe
+  ansible.builtin.template:
+    src: Dockerfile.arch.j2
+    dest: "{{ arc_b70_e2a_build_context }}/Dockerfile.arc_b70"
+    mode: '0644'
+
+# The recipe is identified by the checksum of the files that determine it
+# (the patched Dockerfile) plus the build arguments that steer the build
+# (the device string and the index URL). The checksum is written into the
+# image as a label, so "is the image current?" is one label lookup.
+#
+# Without this, the guard below (the image's presence) cannot tell a
+# current image from a stale one: the image tag does not change when the
+# image is rebuilt under it, so an image built before the UV_INDEX_URL
+# fix looked present and the build was skipped -- and the container kept
+# running torch 2.15.0+cu132.
+- name: Compute the build recipe checksum
+  ansible.builtin.stat:
+    path: "{{ arc_b70_e2a_build_context }}/Dockerfile.arc_b70"
+    checksum_algorithm: sha256
+  register: arc_b70_e2a_recipe_files
+
+- name: Record the build recipe checksum
+  ansible.builtin.set_fact:
+    # The recipe is hashed, not concatenated: the device string contains
+    # spaces and quotes, and a label value has to be a single shell token.
+    # The parentheses matter -- without them the | hash filter binds to
+    # arc_b70_e2a_index_strategy alone and every earlier term is passed
+    # through verbatim, quotes and all.
+    arc_b70_e2a_recipe: >-
+      {{ (arc_b70_e2a_recipe_files.stat.checksum
+          ~ arc_b70_e2a_device_str
+          ~ arc_b70_e2a_base_index_url
+          ~ arc_b70_e2a_index_url
+          ~ arc_b70_e2a_index_strategy)
+         | hash('sha256') }}
+
+- name: Read the build recipe label from the current image
+  ansible.builtin.command:
+    cmd: >-
+      docker image inspect --format
+      '{{ '{{' }} index .Config.Labels "org.arcb70.recipe" {{ '}}' }}'
+      {{ arc_b70_e2a_image }}
+  register: arc_b70_e2a_image_recipe
+  changed_when: false
+  failed_when: false
+
+# The build always reports "Successfully built", so the guard is the image's
+# presence AND its recipe label -- otherwise every play reports changed=1,
+# and a stale image under an unchanged tag is never rebuilt.
+- name: Check whether the XPU image already exists and is current
+  ansible.builtin.command:
+    cmd: "docker image inspect {{ arc_b70_e2a_image }}"
+  register: arc_b70_e2a_image_state
+  changed_when: false
+  failed_when: false
+
+# The build context is the WHOLE checkout: upstream's Dockerfile does
+# "COPY . /app" and then runs ./ebook2audiobook.command --script_mode
+# build_docker.
+# The build writes its own log rather than returning its output to Ansible.
+#
+# Two reasons. A docker build's output is large and, without --progress=plain,
+# is a stream of carriage-return progress lines that Ansible buffers in full --
+# one run sat at this task for 13 minutes with 37 s of CPU, waiting on a remote
+# pipe that a build child was still holding open. Redirecting to a file leaves
+# Ansible with nothing but the exit code.
+#
+# And the log is worth having: diagnosing this image's CUDA-torch defect was
+# only possible once a --progress=plain build log existed. The role captured its
+# own build output nowhere before that.
+- name: Build the XPU image
+  ansible.builtin.shell:
+    cmd: >-
+      docker build
+      --progress=plain
+      -f Dockerfile.arc_b70
+      --build-arg DEVICE_TAG=xpu
+      --build-arg DOCKER_DEVICE_STR={{ arc_b70_e2a_device_str | quote }}
+      --label "org.arcb70.recipe={{ arc_b70_e2a_recipe }}"
+      -t {{ arc_b70_e2a_image }}
+      . > {{ arc_b70_e2a_build_log }} 2>&1
+    chdir: "{{ arc_b70_e2a_build_context }}"
+    executable: /bin/bash
+  when: >-
+    arc_b70_e2a_image_state.rc != 0
+    or arc_b70_e2a_image_recipe.stdout | trim != arc_b70_e2a_recipe | trim
+  changed_when: true
+
+- name: Report where the build log is
+  ansible.builtin.debug:
+    msg: "ebook2audiobook image build log: {{ arc_b70_e2a_build_log }}"
+
+- name: Deploy the ebook2audiobook compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ arc_b70_e2a_dir }}/compose.yaml"
+    mode: '0644'
+
+- name: Check the ebook2audiobook container's state
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' ebook2audiobook"
+  register: arc_b70_e2a_state
+  changed_when: false
+  failed_when: false
+
+# The container MUST be recreated when the image was rebuilt. The image tag
+# does not change when the image is rebuilt under it, so "docker compose up
+# -d" sees the same image reference and leaves the old container running --
+# with the OLD image.
+- name: Read the image id the running container was created from
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.Image{{ '}}' }}' ebook2audiobook"
+  register: arc_b70_e2a_running_image
+  changed_when: false
+  failed_when: false
+
+- name: Read the image id of the current image
+  ansible.builtin.command:
+    cmd: "docker image inspect -f '{{ '{{' }}.Id{{ '}}' }}' {{ arc_b70_e2a_image }}"
+  register: arc_b70_e2a_current_image
+  changed_when: false
+  failed_when: false
+
+- name: Start the ebook2audiobook container
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_e2a_dir }}/compose.yaml up -d --force-recreate"
+    chdir: "{{ arc_b70_e2a_dir }}"
+  register: arc_b70_e2a_up
+  when: >-
+    arc_b70_e2a_state.rc != 0
+    or 'running' not in arc_b70_e2a_state.stdout
+    or arc_b70_e2a_running_image.stdout | trim != arc_b70_e2a_current_image.stdout | trim
+  changed_when: true
+
+- name: Wait for ebook2audiobook to answer
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_e2a_port }}/"
+  register: arc_b70_e2a_root
+  until: arc_b70_e2a_root.status == 200
+  retries: 60
+  delay: 5
+
+# The assertion that separates a correct build from the broken upstream xpu
+# profile: issue #2055's exact symptom is +cu130 with xpu.is_available() False.
+- name: Assert the container really has XPU torch
+  ansible.builtin.command:
+    cmd: >-
+      docker exec ebook2audiobook python3 -c
+      "import torch; print(torch.__version__); print(torch.xpu.device_count()); print(torch.xpu.is_available())"
+  register: arc_b70_e2a_torch
+  changed_when: false
+  failed_when: >-
+    '+xpu' not in arc_b70_e2a_torch.stdout
+    or 'True' not in arc_b70_e2a_torch.stdout
+
+- name: Record the torch version
+  ansible.builtin.debug:
+    msg: "{{ arc_b70_e2a_torch.stdout_lines | default([]) | join(' | ') }}"

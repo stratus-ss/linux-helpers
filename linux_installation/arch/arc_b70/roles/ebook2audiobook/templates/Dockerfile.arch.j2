@@ -1,0 +1,113 @@
+# ebook2audiobook on torch.xpu -- built from scratch on an Arch base.
+#
+# WHY ARCH, and not upstream's Debian bookworm image:
+#
+# No Debian/Ubuntu packaging of Intel's Level Zero driver supports Battlemage.
+# Measured on 2026-11-17 against this card (8086:E223, xe driver):
+#
+#   Debian 12 bookworm  intel-opencl-icd      22.43.24595.41   (no L0 driver at all)
+#   Intel apt repo      libze-intel-gpu1      25.18.33578.15   (0 Battlemage strings)
+#   Arch rolling        intel-compute-runtime 26.40.40196.8    (names "Arc(TM) Pro B70")
+#
+# The Intel repo tops out at 25.18 for BOTH jammy and noble, and newer packages
+# need glibc >= 2.38 -- bookworm has 2.36. Inside the Debian image the result
+# was `zeInit` -> ZE_RESULT_ERROR_UNINITIALIZED and torch reporting "XPU device
+# count is zero", with a correct +xpu torch. The driver was present; it simply
+# did not know the card. Arch ships the runtime the working host runs.
+FROM archlinux:base
+
+# Build args are declared after FROM to be in scope for the image: without
+# this, DOCKER_DEVICE_STR expands to empty, the app falls back to its CUDA
+# default, and the image ships CPU fallback -- upstream issue #2055.
+ARG DEVICE_TAG=xpu
+ARG DOCKER_DEVICE_STR={"name": "xpu", "os": "manylinux_2_28", "arch": "x86_64", "pyvenv": [3, 12], "tag": "xpu"}
+ENV DEVICE_TAG=${DEVICE_TAG}
+ENV DOCKER_DEVICE_STR=${DOCKER_DEVICE_STR}
+
+# intel-compute-runtime is the L0 driver (libze_intel_gpu) and
+# level-zero-loader is the loader it plugs into. Together they are the whole
+# GPU userspace; nothing from Intel's apt repositories is used.
+#
+# The remaining packages mirror upstream's DOCKER_PROGRAMS_STR: the app shells
+# out to ffmpeg, espeak-ng, sox, tesseract, mediainfo, node and calibre. Calibre
+# is what actually converts an ebook, so leaving it out would ship a UI that
+# cannot do the one thing it exists for.
+#
+# `pacman -Syu` is not optional: the archlinux:base image is a snapshot, and
+# installing without a full upgrade either fails on signature/dependency drift
+# or, worse, resolves an old compute-runtime -- the exact thing this image
+# exists to avoid.
+RUN pacman -Syu --needed --noconfirm \
+      python python-pip uv git ffmpeg espeak-ng sox unzip curl ca-certificates \
+      tesseract mediainfo nodejs npm calibre \
+      intel-compute-runtime level-zero-loader \
+ && pacman -Scc --noconfirm
+
+# IN_DOCKER=1 is what app.py's is_running_in_container() reads, and
+# --script_mode full_docker is refused without it ("full_docker is only an
+# internal option for the docker itself"). Upstream's Dockerfile sets it; a
+# from-scratch recipe has to remember it.
+ENV IN_DOCKER=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1
+
+# Upstream supports up to 3.12 (MAX_PYTHON_VERSION in ebook2audiobook.command)
+# and every dependency in requirements.txt has a 3.12 wheel. Arch's system
+# python is 3.14, so the venv pins 3.12 with a uv standalone build rather than
+# inheriting the system interpreter.
+ENV UV_PYTHON_INSTALL_DIR=/opt/python
+# --seed is required, not cosmetic: `uv venv` does not install pip, so bare
+# `pip` falls through to Arch's system Python, which is PEP 668
+# externally-managed and refuses to install anything.
+RUN uv venv --python 3.12 --seed /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH=/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+WORKDIR /app
+
+# The whole source is copied before installing: requirements.txt contains a
+# local path requirement (./ext/py/demucs), so it cannot be resolved against a
+# context holding only the requirements file. The source changes only when the
+# pinned commit changes, so cache invalidation is not a concern.
+COPY . /app
+
+# The XPU wheels go in FIRST, not last. requirements.txt pulls torch
+# transitively (torchvggish, coqui-tts, pyannote-audio) and on Linux a plain
+# resolve takes PyPI's CUDA build: ~5 GB of nvidia-*/cuda-toolkit wheels,
+# downloaded and then thrown away. That is also what filled the disk on an
+# earlier attempt -- the build died at "no space left on device" while
+# exporting. Installing the XPU wheels first means the requirement is already
+# satisfied and the CUDA stack is never fetched at all.
+#
+# Dependencies are NOT skipped here. torch 2.15.0+xpu links libsycl.so.9, which
+# arrives as one of its own dependencies (intel-sycl-rt 2026.2). An earlier
+# --no-deps attempt installed the wheel without the runtime it links against
+# and `import torch` died with "libsycl.so.9: cannot open shared object file".
+RUN pip install --no-cache-dir \
+      --index-url {{ arc_b70_e2a_index_url }} torch torchaudio
+
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Then prove nothing later in the resolve replaced them, and drop anything a
+# dependency still managed to drag in. The assertion is what makes a silently
+# CPU-only image impossible: it fails the build instead.
+RUN set -eux; \
+    pip list --format=freeze > /tmp/pkgs.txt; \
+    grep -iE '^(nvidia-|cuda-|triton==)' /tmp/pkgs.txt | cut -d= -f1 > /tmp/gone.txt || true; \
+    if [ -s /tmp/gone.txt ]; then pip uninstall -y -r /tmp/gone.txt || true; fi; \
+    rm -f /tmp/pkgs.txt /tmp/gone.txt; \
+    python -c "import torch; v=torch.__version__; assert '+xpu' in v, v; assert torch.version.cuda is None, torch.version.cuda; print('FINAL-TORCH', v)"
+
+# Upstream's own directory layout -- the app reads and writes these paths.
+RUN mkdir -p /app/ebooks /app/audiobooks /app/models /app/voices /app/tmp /app/run
+
+VOLUME ["/app/ebooks", "/app/audiobooks", "/app/models", "/app/voices", "/app/tmp"]
+
+EXPOSE 7860
+
+# Upstream's own entrypoint, minus the Debian installer script: the image is
+# already built, so app.py runs directly. --script_mode full_docker is what
+# makes it read DOCKER_DEVICE_STR and serve on 7860.
+ENTRYPOINT ["python", "-u", "app.py", "--script_mode", "full_docker"]

@@ -1,0 +1,28 @@
+# Upstream's own compose shape (docker-compose.yml, the xpu profile), without
+# the build: block -- the image is built by the role from the pinned source,
+# and upstream's compose sets "pull_policy: never" for exactly that reason.
+#
+# The mount targets are upstream's own container paths. The previous shape
+# mounted /audio /temp /cache, which do not exist in the image: docker creates
+# missing bind-mount points silently, so those three were empty directories
+# nothing read or wrote. The app writes models, voices and output under /app.
+#
+# /dev/dri plus the host's render GID is what makes the XPU visible; the image
+# runs as root, so no in-image group is needed.
+services:
+  ebook2audiobook:
+    container_name: ebook2audiobook
+    image: {{ arc_b70_e2a_image }}
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "{{ arc_b70_render_gid }}"
+    volumes:
+      - {{ arc_b70_e2a_ebooks }}:/app/ebooks
+      - {{ arc_b70_e2a_audiobooks }}:/app/audiobooks
+      - {{ arc_b70_e2a_models }}:/app/models
+      - {{ arc_b70_e2a_voices }}:/app/voices
+      - {{ arc_b70_e2a_tmp }}:/app/tmp
+    ports:
+      - "127.0.0.1:{{ arc_b70_e2a_port }}:7860"
+    restart: unless-stopped
