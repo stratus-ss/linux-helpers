@@ -326,7 +326,12 @@ arc_b70_e2a_source: "https://github.com/DrewThomasson/ebook2audiobook.git"
 arc_b70_e2a_commit: "4b182a3dc60e642901042de333b2f4e1b69dfe72"
 arc_b70_e2a_build_context: "{{ arc_b70_e2a_dir }}/src"
 arc_b70_e2a_image: "arc_b70/ebook2audiobook:xpu"
-arc_b70_e2a_base_image: "ghcr.io/goodhertz/ebook2audiobook:xpu"
+# NOTE: there is no base_image var. The image is built FROM SCRATCH on
+# archlinux:base -- see roles/ebook2audiobook/templates/Dockerfile.arch.j2.
+# Upstream publishes ghcr.io/goodhertz/ebook2audiobook:xpu, but that image is
+# Debian-based and cannot see a Battlemage card at all (see 4.2.1 in the KB:
+# no packaged Level Zero below 26.x knows the card). Referencing it here
+# would be misleading, so it is not declared.
 # The device JSON the app's installer reads. The shape is the one upstream's
 # own Dockerfile default uses, with the xpu name and tag:
 #   name  the devices['XPU'] key -> "xpu"
