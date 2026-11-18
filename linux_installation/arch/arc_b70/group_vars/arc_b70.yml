@@ -158,6 +158,17 @@ arc_b70_whisper_probe_audio: "{{ arc_b70_aistuff_mount }}/whisper/2d8dcea5-fff8-
 arc_b70_frigate_dir: "{{ arc_b70_root }}/frigate"
 arc_b70_frigate_image: ghcr.io/blakeblackshear/frigate:0.18.0
 arc_b70_frigate_port: 5000
+# Whether detection runs at all. This switch drives BOTH the rendered config
+# and the role's post-start verification, so intent and check cannot drift
+# apart: with it false the config disables detect, and the role stops asserting
+# that the detector inferred (it cannot, there is nothing to infer).
+#
+# false as of 2026-11-18 by operator direction: this instance is watching ten
+# cameras and the motion/detection CPU across them is not wanted here. Frigate
+# still decodes every stream on the GPU (VAAPI) and still writes clip previews,
+# it just never runs the OpenVINO model. Set this back to true and re-run the
+# role to restore inference -- the detector assertions then re-arm themselves.
+arc_b70_frigate_detect_enabled: false
 arc_b70_frigate_config: "{{ arc_b70_frigate_dir }}/config"
 arc_b70_frigate_media: "{{ arc_b70_frigate_dir }}/media"
 arc_b70_frigate_storage: "{{ arc_b70_frigate_dir }}/storage"

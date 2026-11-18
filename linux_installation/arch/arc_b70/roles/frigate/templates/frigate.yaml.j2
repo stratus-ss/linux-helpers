@@ -25,6 +25,19 @@ ffmpeg:
 #     detector is explicitly ignored by the config validator ("The model key
 #     should be specified at the root level of the config"), which silently
 #     leaves the detector on its default device.
+# Live view transport. The default is jsmpeg, which makes Frigate spawn one
+# extra ffmpeg PER VIEWER PER CAMERA that reads already-decoded raw frames from
+# a pipe and re-encodes them to mpeg1video. That encoder has no hardware path,
+# so those processes are pure CPU and never appear on the GPU -- 12 of them were
+# running on 2026-11-18 simply because a browser tab had the UI open.
+#
+# mse hands the browser the camera's ORIGINAL H.264/H.265 stream and lets it
+# decode, so no re-encode happens at all and those processes never spawn.
+# webrtc does the same with a peer connection (lower latency, more moving
+# parts). Set a camera's own `live: mode:` to override this per camera.
+live:
+  mode: mse
+
 detectors:
   ov:
     type: openvino
@@ -48,7 +61,7 @@ model:
   model_type: ssd
 
 detect:
-  enabled: true
+  enabled: {{ arc_b70_frigate_detect_enabled }}
 
 # No recording anywhere. The operator's constraint is enforced here and
 # asserted before the container starts.
@@ -74,8 +87,13 @@ cameras:
             - {{ role }}
 {% endfor %}
 {% endfor %}
+    # arc_b70_frigate_detect_enabled is a MASTER switch: false forces every
+    # camera off regardless of its own detect_enabled, true lets each camera
+    # opt out individually. Without the 'and' the ten explicit
+    # detect_enabled: true entries here would override the global switch and
+    # the master would silently do nothing.
     detect:
-      enabled: {{ cam.detect_enabled | default(true) }}
+      enabled: {{ (arc_b70_frigate_detect_enabled | bool) and (cam.detect_enabled | default(true) | bool) }}
     record:
       enabled: false
 {% endfor %}

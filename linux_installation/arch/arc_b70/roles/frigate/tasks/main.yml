@@ -336,13 +336,51 @@
 
 # The detector counters live in /api/stats under .detectors.ov. There is no
 # /api/stats/detectors endpoint in 0.18 (it returns 404).
+#
+# detection_start is the load-bearing field, NOT inference_speed. inference_speed
+# carries a non-zero initial value (10.0 ms) before any inference has happened,
+# so asserting `inference_speed > 0` passes against a detector that has never
+# run -- which is exactly what happened on 2026-11-18, when the role reported
+# success while /api/stats showed detection_start: 0.0 and detection_fps: 0.0 on
+# every camera. detection_start only becomes non-zero once the model has really
+# inferred, so it is the honest signal. It needs a wait: Frigate only runs the
+# detector when motion is detected, and there is no motion in the seconds right
+# after a restart.
+- name: Wait for the detector to perform a real inference
+  when: arc_b70_frigate_detect_enabled | bool
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_frigate_port }}/api/stats"
+  register: arc_b70_frigate_detector_stats
+  until: >-
+    arc_b70_frigate_detector_stats.status == 200 and
+    (arc_b70_frigate_detector_stats.json.detectors.ov.detection_start | default(0) | float) > 0
+  retries: 30
+  delay: 10
+
 - name: Assert the detector is actually inferring
+  when: arc_b70_frigate_detect_enabled | bool
   ansible.builtin.assert:
     that:
-      - (arc_b70_frigate_camera_stats.json.detectors.ov.inference_speed | default(0) | float) > 0
+      - (arc_b70_frigate_detector_stats.json.detectors.ov.detection_start | default(0) | float) > 0
+      - (arc_b70_frigate_detector_stats.json.detectors.ov.inference_speed | default(0) | float) > 0
     fail_msg: >-
-      The ov detector is configured but has not inferred. Detector stats:
-      {{ arc_b70_frigate_camera_stats.json.detectors.ov | default('absent') }}
+      The ov detector is configured but has never inferred. Detector stats:
+      {{ arc_b70_frigate_detector_stats.json.detectors.ov | default('absent') }}
+    quiet: true
+
+# Ten milliseconds is the CPU fallback on this host; the GPU answers in 2-4.
+# A loose ceiling rather than a tight one -- the point is to catch a silent
+# fallback, not to police normal variance.
+- name: Assert the detector is not running on the CPU fallback
+  when: arc_b70_frigate_detect_enabled | bool
+  ansible.builtin.assert:
+    that:
+      - (arc_b70_frigate_detector_stats.json.detectors.ov.inference_speed | float) < 8.0
+    fail_msg: >-
+      Detector inference_speed is
+      {{ arc_b70_frigate_detector_stats.json.detectors.ov.inference_speed }} ms,
+      which is the CPU fallback (the GPU answers in 2-4 ms). The OpenVINO GPU
+      compile probably failed -- check the log for 'ProgramBuilder build failed'.
     quiet: true
 
 - name: Record the frame and inference counters
@@ -350,5 +388,8 @@
     msg: >-
       Frigate camera_fps:
       {{ arc_b70_frigate_camera_stats.json.cameras | dict2items | map(attribute='value.camera_fps') | list }}
-      -- detector inference_speed (ms):
-      {{ arc_b70_frigate_camera_stats.json.detectors.ov.inference_speed | default('n/a') }}
+      -- detection {{ 'enabled' if (arc_b70_frigate_detect_enabled | bool) else 'DISABLED by arc_b70_frigate_detect_enabled' }}
+      {%- if arc_b70_frigate_detect_enabled | bool %},
+      detector inference_speed (ms):
+      {{ arc_b70_frigate_detector_stats.json.detectors.ov.inference_speed | default('n/a') }}
+      {%- endif %}
