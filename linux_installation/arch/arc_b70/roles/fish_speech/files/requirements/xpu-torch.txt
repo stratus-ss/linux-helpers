@@ -1,0 +1,27 @@
+# PyTorch 2.11 for Intel XPU and its oneAPI runtime wheels.
+# uv pip install --index-url https://download.pytorch.org/whl/xpu -r requirements/xpu-torch.txt
+dpcpp-cpp-rt==2025.3.2
+impi-rt==2021.17.2
+intel-cmplr-lib-rt==2025.3.2
+intel-cmplr-lib-ur==2025.3.2
+intel-cmplr-lic-rt==2025.3.2
+intel-opencl-rt==2025.3.2
+intel-openmp==2025.3.2
+intel-pti==0.16.0
+intel-sycl-rt==2025.3.2
+mkl==2025.3.1
+oneccl-devel==2021.17.2
+oneccl==2021.17.2
+onemkl-license==2025.3.1
+onemkl-sycl-blas==2025.3.1
+onemkl-sycl-dft==2025.3.1
+onemkl-sycl-lapack==2025.3.1
+onemkl-sycl-rng==2025.3.1
+onemkl-sycl-sparse==2025.3.1
+pyelftools==0.32
+tbb==2022.3.1
+tcmlib==1.4.1
+torch==2.11.0+xpu
+torchaudio==2.11.0+xpu
+triton-xpu==3.7.0
+umf==1.0.3

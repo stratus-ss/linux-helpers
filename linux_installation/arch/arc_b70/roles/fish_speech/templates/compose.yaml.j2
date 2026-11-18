@@ -1,0 +1,95 @@
+# FishTTS: TWO containers from ONE image (DR-3).
+#
+# The api_server and the WebUI share one venv, one patch set and one runtime,
+# so a second image would duplicate ~8 GB for no difference in behaviour. What
+# differs between them is only the command and one argument.
+#
+# --listen 0.0.0.0 INSIDE the container is correct and must not be "fixed" to
+# 127.0.0.1: the host side of each port mapping below is what enforces
+# loopback-only. Binding 127.0.0.1 inside the container's own network namespace
+# would make the ports unreachable through the mapping.
+#
+# restart: "no" on both (DR-4) -- the roles start these to prove them and then
+# stop them, and the b70q queue requires the card free between runs.
+# Pin the compose PROJECT name. Without it it is derived from the
+# containing directory, so moving the file renames the project -- which
+# makes `compose up` try to CREATE containers whose names are still held
+# by the old project, and fails with 'name is already in use'.
+name: arc-b70-fish
+
+services:
+  fish-api:
+    container_name: fish-api
+    image: {{ arc_b70_fish_image }}
+    user: "10001:10001"
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "{{ arc_b70_render_gid }}"
+    environment:
+      # HF_HOME must be a WRITABLE mounted path: the model loader writes its
+      # cache there, and the image's own /opt/hf-cache is a mount point.
+      HF_HOME: /opt/hf-cache
+    volumes:
+      # The 11 GB S2-Pro checkpoint is READ-ONLY: nothing in either service
+      # writes into the weights.
+      - {{ arc_b70_fish_ckpt }}:/opt/fish/checkpoints/s2-pro:ro
+      - {{ arc_b70_fishtts_out }}:/opt/fish/out
+      - {{ arc_b70_fish_hf_cache }}:/opt/hf-cache
+    ports:
+      - "127.0.0.1:{{ arc_b70_fishtts_api_port }}:8080"
+    shm_size: "2gb"
+    restart: "no"
+    command:
+      - /opt/venv/bin/python
+      - tools/api_server.py
+      - --listen
+      - 0.0.0.0:8080
+      # --device xpu is a real api_server flag (tools/server/api_utils.py) and
+      # it is REQUIRED: model_manager.py otherwise defaults the device to
+      # cuda/cpu, and the api-server XPU patch is what makes it respect an
+      # explicit choice. There is no --compile flag: the xe driver cannot
+      # compile for XPU without Level Zero headers.
+      - --device
+      - xpu
+      - --llama-checkpoint-path
+      - /opt/fish/checkpoints/s2-pro
+      - --decoder-checkpoint-path
+      - /opt/fish/checkpoints/s2-pro/codec.pth
+      - --decoder-config-name
+      - modded_dac_vq
+
+  fish-webui:
+    container_name: fish-webui
+    image: {{ arc_b70_fish_image }}
+    user: "10001:10001"
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "{{ arc_b70_render_gid }}"
+    environment:
+      HF_HOME: /opt/hf-cache
+    volumes:
+      - {{ arc_b70_fish_ckpt }}:/opt/fish/checkpoints/s2-pro:ro
+      - {{ arc_b70_fishtts_out }}:/opt/fish/out
+      - {{ arc_b70_fish_hf_cache }}:/opt/hf-cache
+    ports:
+      - "127.0.0.1:{{ arc_b70_fishtts_webui_port }}:7861"
+    shm_size: "2gb"
+    restart: "no"
+    # depends_on orders START ONLY, not readiness: the api_server takes ~6
+    # minutes to load S2-Pro and bind. The role's wait-for-/v1/health is the
+    # real gate.
+    depends_on:
+      - fish-api
+    command:
+      - /opt/venv/bin/python
+      - tools/run_webui.py
+      - --listen
+      - 0.0.0.0:7861
+      - --llama-checkpoint-path
+      - /opt/fish/checkpoints/s2-pro
+      - --decoder-checkpoint-path
+      - /opt/fish/checkpoints/s2-pro/codec.pth
+      - --decoder-config-name
+      - modded_dac_vq

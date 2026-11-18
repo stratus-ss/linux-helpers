@@ -1,0 +1,102 @@
+fish-speech WebUI XPU patch for Intel Arc (B70).
+Target: https://github.com/fishaudio/fish-speech commit 214da3cd841bda85da2496b96cd3c4d7edb1337e
+Apply: cd fish-speech && git apply ../patches/fish-speech-webui-xpu.patch
+
+The WebUI is a separate entry point from the api_server: tools/run_webui.py
+builds its own model stack and does NOT go through tools/server/model_manager.py,
+so the api_server patch (fish-speech-api-xpu.patch) does not cover it.
+
+Two defects, both of which put the WebUI somewhere other than where it was
+asked to go:
+
+1. Device selection. Upstream overwrites whatever --device the caller passed
+   in with the first available accelerator, so an explicit request is silently
+   discarded. The fix mirrors model_manager.py: only force a default when the
+   caller did not choose one, and log the device that was actually selected.
+
+2. app.launch() takes no address. Upstream binds Gradio's 0.0.0.0:7860 default.
+   The host's plan puts the WebUI on 127.0.0.1:7861 and every service on this
+   box binds loopback only, so the launch needs an explicit address. The new
+   --listen argument uses the api_server's own spelling.
+diff --git a/tools/run_webui.py b/tools/run_webui.py
+index 37130a0..89c16d5 100644
+--- a/tools/run_webui.py
++++ b/tools/run_webui.py
+@@ -32,11 +32,31 @@ def parse_args():
+         default="checkpoints/s2-pro/codec.pth",
+     )
+     parser.add_argument("--decoder-config-name", type=str, default="modded_dac_vq")
+-    parser.add_argument("--device", type=str, default="cuda")
++    # XPU patch: the default must follow the hardware. The selection block
++    # below only picks a device when the caller did not choose one, and a
++    # default of the literal "cuda" reads as a choice -- so on an XPU-only
++    # host the model is moved to a CUDA device and torch raises
++    # "Torch not compiled with CUDA enabled". Same fix as
++    # tools/server/api_utils.py.
++    parser.add_argument(
++        "--device",
++        type=str,
++        default="xpu" if torch.xpu.is_available() else "cuda",
++    )
+     parser.add_argument("--half", action="store_true")
+     parser.add_argument("--compile", action="store_true")
+     parser.add_argument("--max-gradio-length", type=int, default=0)
+     parser.add_argument("--theme", type=str, default="light")
++    # XPU patch: the WebUI must bind an explicit address. Upstream calls
++    # app.launch() with no arguments, which binds 0.0.0.0 on Gradio's default
++    # port 7860 -- a different port than the host's plan, and reachable from
++    # the LAN. Same spelling as the api_server's own --listen.
++    parser.add_argument(
++        "--listen",
++        type=str,
++        default="127.0.0.1:7861",
++        help="host:port the Gradio server binds to",
++    )
+ 
+     return parser.parse_args()
+ 
+@@ -45,16 +65,28 @@ if __name__ == "__main__":
+     args = parse_args()
+     args.precision = torch.half if args.half else torch.bfloat16
+ 
+-    # Check if MPS or CUDA is available
++    # Check if MPS, CUDA or XPU is available.
++    # XPU patch: the device is only forced to a default when the caller did
++    # not choose one explicitly. Upstream overwrites any --device the caller
++    # passed in with the first available accelerator, so an explicit request
++    # is silently discarded and the WebUI can end up on the CPU while the
++    # api_server on the same box runs on the XPU. Same fix as
++    # tools/server/model_manager.py.
+     if torch.backends.mps.is_available():
+         args.device = "mps"
+         logger.info("mps is available, running on mps.")
+-    elif torch.xpu.is_available():
+-        args.device = "xpu"
+-        logger.info("XPU is available, running on XPU.")
+-    elif not torch.cuda.is_available():
+-        logger.info("CUDA is not available, running on CPU.")
+-        args.device = "cpu"
++    elif args.device not in ("cuda", "xpu"):
++        if torch.cuda.is_available():
++            args.device = "cuda"
++        elif torch.xpu.is_available():
++            args.device = "xpu"
++        else:
++            logger.info("CUDA and XPU are not available, running on CPU.")
++            args.device = "cpu"
++    if args.device == "xpu":
++        logger.info(f"XPU is available, running on {torch.xpu.get_device_name(0)}.")
++    else:
++        logger.info(f"Running on {args.device}.")
+ 
+     logger.info("Loading Llama model...")
+     llama_queue = launch_thread_safe_queue(
+@@ -104,4 +136,7 @@ if __name__ == "__main__":
+     inference_fct = get_inference_wrapper(inference_engine)
+ 
+     app = build_app(inference_fct, args.theme)
+-    app.launch()
++    # XPU patch: bind the address the caller asked for instead of Gradio's
++    # 0.0.0.0:7860 default.
++    host, _, port = args.listen.rpartition(":")
++    app.launch(server_name=host or "127.0.0.1", server_port=int(port))

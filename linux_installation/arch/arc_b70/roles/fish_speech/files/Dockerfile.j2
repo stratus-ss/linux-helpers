@@ -1,0 +1,140 @@
+# FishTTS (fish-speech S2-Pro) on torch.xpu -- built from the pinned upstream
+# commit on the shared XPU base.
+#
+# This replaces the most fragile state on the host: three hand-applied patches
+# against a checkout, plus a hand-built XPU venv. Here the patch application is
+# a build step against a pinned SHA, and the venv is immutable.
+#
+# ONE IMAGE, TWO CONTAINERS (DR-3). The api_server and the WebUI share one
+# venv, one patch set and one runtime; a second image would duplicate ~8 GB for
+# no difference in behaviour. The compose file supplies the two commands.
+#
+# THE CHECKPOINT IS NEVER BAKED. The 11 GB S2-Pro set lives on the host
+# filesystem and is bind-mounted read-only at /opt/fish/checkpoints/s2-pro.
+FROM containers.x86experts.com:5000/arc-b70/xpu-base:2026.11
+
+ARG FISH_COMMIT=214da3cd841bda85da2496b96cd3c4d7edb1337e
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
+    HF_HOME=/opt/hf-cache
+
+# The three XPU patches, byte-identical copies of the canonical ones at
+# roles/intel_gpu/files/b70-tts/patches/. They are copied into the build
+# context because a build context cannot reach outside its own directory --
+# COPY --from is not an alternative: it reads another build stage or image,
+# not host paths.
+COPY patches/ /tmp/patches/
+
+# requirements/xpu-torch.txt and requirements/fish.txt are the vendored pins,
+# not upstream's. They ship in the same build context for the same reason.
+COPY requirements/ /tmp/requirements/
+
+# The pinned commit is FETCHED BY SHA, not cloned-then-checked-out.
+#
+# `git clone --depth 1` fetches only the BRANCH TIP, so checking out a commit
+# that is not that tip fails with "reference is not a tree". The
+# init + fetch --depth 1 origin <SHA> form fetches exactly the pinned commit,
+# which is both smaller and correct.
+#
+# The fetch is a shallow, single-commit fetch of the PINNED SHA -- not a
+# `git clone --depth 1`, which fetches only the branch tip and cannot check out
+# a non-tip commit. The patches are applied against that exact working tree, so
+# `git apply --check --reverse` finds the same context later.
+RUN set -eux; \
+    git init /opt/fish-speech; \
+    git -C /opt/fish-speech remote add origin https://github.com/fishaudio/fish-speech.git; \
+    git -C /opt/fish-speech fetch --depth 1 origin ${FISH_COMMIT}; \
+    git -C /opt/fish-speech checkout FETCH_HEAD
+
+WORKDIR /opt/fish-speech
+
+# Applied in order, and WITHOUT a fallback. A `git apply` failure must fail the
+# build: `|| true` here would ship an image whose FishTTS silently runs on the
+# CPU, because the patches are what make the model internals, the api_server's
+# device selection and the WebUI's device/bind behaviour XPU-correct.
+#
+#   fish-speech-xpu.patch       the model internals (inference.py, llama.py)
+#   fish-speech-api-xpu.patch   the api_server's device selection -- without
+#                               it tools/server/model_manager.py forces "cpu"
+#                               whenever CUDA is absent
+#   fish-speech-webui-xpu.patch the WebUI's device selection AND its bind
+#                               address: upstream calls app.launch() with no
+#                               arguments, binding Gradio's 0.0.0.0:7860
+RUN set -eux; \
+    git apply /tmp/patches/fish-speech-xpu.patch; \
+    git apply /tmp/patches/fish-speech-api-xpu.patch; \
+    git apply /tmp/patches/fish-speech-webui-xpu.patch
+
+# WORKDIR is set above, immediately after the checkout, because both runtime
+# commands are relative (tools/api_server.py, tools/run_webui.py) and a
+# container's working directory defaults to "/".
+
+# The XPU torch stack comes from xpu-torch.txt, which pins the whole Intel
+# runtime: torch/torchaudio 2.11.0+xpu, triton-xpu, intel-sycl-rt,
+# dpcpp-cpp-rt, umf, mkl, oneccl. It is the single source of those versions --
+# no version is re-derived in this file.
+#
+# --index-url (not --extra-index-url): torch itself must come from the XPU
+# index, and every other package in this file is also published there.
+RUN pip install --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/xpu \
+      -r /tmp/requirements/xpu-torch.txt
+
+# torch ONLY in the constraint. torchvision is not in this stack, and
+# torchaudio shares torch's version scheme but is already pinned by
+# xpu-torch.txt.
+#
+# The file is created here rather than assumed: without it the --constraint
+# flag fails the build with "failed to read constraint file".
+RUN printf 'torch=={{ arc_b70_xpu_torch_version }}\n' > /tmp/constraints.txt
+
+# --no-deps plus the torch constraint, exactly as DR-9 mandates. Without them
+# the resolver pulls a CUDA torch over the XPU wheel from PyPI -- the defect
+# class this image exists to remove.
+RUN pip install --no-cache-dir --no-deps \
+      --constraint /tmp/constraints.txt \
+      -r /tmp/requirements/fish.txt
+
+# Editable, because tools/ imports the package from the source tree it sits in.
+RUN pip install --no-cache-dir --no-deps -e /opt/fish-speech
+
+# The assertion that makes a silently CUDA- or CPU-only image impossible. It
+# reads the image's OWN torch: "+xpu" proves the XPU wheel is installed, and
+# torch.version.cuda is None proves nothing displaced it -- the second check is
+# what catches a CUDA wheel that won the resolve.
+#
+# It does NOT prove the device is usable: a build has no device pass-through,
+# so torch.xpu.is_available() inside a build layer is False by construction.
+# The device assertion is a RUN-TIME one, in the deployed container, with
+# /dev/dri passed through (Task 9).
+RUN set -eux; \
+    python -c "import torch; v=torch.__version__; assert '+xpu' in v, v; assert torch.version.cuda is None, torch.version.cuda; print('FINAL-TORCH', v)"
+
+# The patch assertion that survives the bake. `git apply --check --reverse`
+# exits 0 exactly when the patch IS applied, so this fails the build if any of
+# the three silently did not land. Checked from the repo root, with no
+# preceding cd, because WORKDIR is already /opt/fish-speech.
+RUN set -eux; \
+    test "$(pwd)" = /opt/fish-speech; \
+    test -f tools/api_server.py; \
+    test -f tools/run_webui.py; \
+    git apply --check --reverse /tmp/patches/fish-speech-xpu.patch; \
+    git apply --check --reverse /tmp/patches/fish-speech-api-xpu.patch; \
+    git apply --check --reverse /tmp/patches/fish-speech-webui-xpu.patch; \
+    echo PATCHES-PRESENT
+
+# The non-root runtime user. UID 10001 is shared with the ComfyUI image so one
+# UID owns both services' writable paths.
+RUN useradd -u 10001 -m -s /usr/bin/nologin fish \
+ && mkdir -p /opt/fish/checkpoints/s2-pro /opt/fish/out /opt/hf-cache \
+ && chown -R 10001:10001 /opt/fish/out /opt/hf-cache
+
+USER 10001:10001
+
+EXPOSE 8080 7861
+
+# No ENTRYPOINT and no CMD: the compose file supplies one command per service,
+# so the container's argv is the compose "command" verbatim.

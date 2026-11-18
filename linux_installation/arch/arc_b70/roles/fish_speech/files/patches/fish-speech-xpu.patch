@@ -1,0 +1,120 @@
+fish-speech XPU patch for Intel Arc (B70) batched / XPU-graph decoding.
+Target: https://github.com/fishaudio/fish-speech commit 214da3cd841bda85da2496b96cd3c4d7edb1337e
+Apply: cd fish-speech && git apply ../patches/fish-speech-xpu.patch
+
+diff --git a/fish_speech/models/text2semantic/inference.py b/fish_speech/models/text2semantic/inference.py
+index 9fb82b0..db77f1c 100644
+--- a/fish_speech/models/text2semantic/inference.py
++++ b/fish_speech/models/text2semantic/inference.py
+@@ -405,8 +405,8 @@ def init_model(checkpoint_path, device, precision, compile=False):
+         logger.info("Compiling function...")
+         decode_one_token = torch.compile(
+             decode_one_token,
+-            backend="inductor" if torch.cuda.is_available() else "aot_eager",
+-            mode="default" if torch.cuda.is_available() else None,
++            backend="inductor" if (torch.cuda.is_available() or torch.xpu.is_available()) else "aot_eager",
++            mode="default" if (torch.cuda.is_available() or torch.xpu.is_available()) else None,
+             fullgraph=True,
+             dynamic=True,
+         )
+@@ -631,8 +631,8 @@ def generate_long(
+     logger.info(f"Split into {len(turns)} turns, grouped into {len(batches)} batches")
+ 
+     for sample_idx in range(num_samples):
+-        if torch.cuda.is_available():
+-            torch.cuda.synchronize()
++        if torch.accelerator.is_available():
++            torch.accelerator.synchronize()
+ 
+         t0 = time.perf_counter()
+ 
+@@ -712,8 +712,8 @@ def generate_long(
+             if sample_idx == 0 and batch_idx == 0 and compile:
+                 logger.info(f"Compilation time: {time.perf_counter() - t0:.2f} seconds")
+ 
+-            if torch.cuda.is_available():
+-                torch.cuda.synchronize()
++            if torch.accelerator.is_available():
++                torch.accelerator.synchronize()
+ 
+             t_batch = time.perf_counter() - t0
+             tokens_generated = y.size(1) - prompt_length
+@@ -905,8 +905,8 @@ def main(
+             max_seq_len=model.config.max_seq_len,
+             dtype=next(model.parameters()).dtype,
+         )
+-    if torch.cuda.is_available():
+-        torch.cuda.synchronize()
++    if torch.accelerator.is_available():
++        torch.accelerator.synchronize()
+ 
+     logger.info(f"Time to load model: {time.time() - t0:.02f} seconds")
+ 
+diff --git a/fish_speech/models/text2semantic/llama.py b/fish_speech/models/text2semantic/llama.py
+index 648ce1a..12fe5d9 100644
+--- a/fish_speech/models/text2semantic/llama.py
++++ b/fish_speech/models/text2semantic/llama.py
+@@ -411,7 +411,8 @@ class BaseTransformer(nn.Module):
+             inp[:, 0] <= self.config.semantic_end_id
+         )
+ 
+-        vq_embeds_sum[~vq_masks] = 0
++        # XPU patch: torch.where instead of boolean-mask assignment (no nonzero() host sync; graph-capturable)
++        vq_embeds_sum = torch.where(vq_masks.unsqueeze(-1), vq_embeds_sum, 0)
+         x = self.embeddings(inp[:, 0]) + vq_embeds_sum
+ 
+         if self.config.scale_codebook_embeddings:
+@@ -448,7 +449,9 @@ class BaseTransformer(nn.Module):
+             )
+ 
+         input_pos_is_valid = ((input_pos >= 0) & (input_pos < active_kv_len)).all()
+-        if input_pos.device.type in {"cpu", "cuda"}:
++        if getattr(self, "_skip_pos_check", False):
++            pass  # XPU patch: set by graph-captured decoding (positions are managed on device)
++        elif input_pos.device.type in {"cpu", "cuda", "xpu"}:
+             torch.ops.aten._assert_async.msg(
+                 input_pos_is_valid,
+                 "input_pos must be within the active KV prefix",
+@@ -459,6 +462,11 @@ class BaseTransformer(nn.Module):
+         mask = self.causal_mask[
+             None, None, input_pos, :active_kv_len
+         ]  # (B, N, Q, active K)
++        rk = getattr(self, "_row_key_mask", None)  # XPU patch: batched decoding with left-padded prompts
++        if rk is not None:  # (B, max_seq) bool; pad keys hidden, each query may still see itself (no NaN rows)
++            kpos = torch.arange(active_kv_len, device=mask.device)
++            mask = mask & (rk[:, None, None, :active_kv_len]
++                           | (kpos[None, None, None, :] == input_pos[None, None, :, None]))
+         freqs_cis = self.freqs_cis[input_pos]
+ 
+         for layer in self.layers:
+@@ -471,6 +479,8 @@ class BaseTransformer(nn.Module):
+ 
+         if self.config.is_reward_model:
+             token_logits = self.score_output(slow_out)
++        elif getattr(self, "_out_weight", None) is not None:
++            token_logits = F.linear(slow_out, self._out_weight)  # XPU patch: sub-vocab head (semantic + im_end)
+         elif self.config.tie_word_embeddings:
+             token_logits = F.linear(slow_out, self.embeddings.weight)
+         else:
+@@ -946,8 +956,19 @@ class Attention(nn.Module):
+                 k = k[:, :, :active_kv_len]
+                 v = v[:, :, :active_kv_len]
+ 
+-        k = k.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
+-        v = v.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
++        rep = self.n_head // self.n_local_heads
++        if (seqlen == 1 and rep > 1 and self.use_sdpa and mask is not None and self.kv_cache is not None
++                and getattr(self, "_gqa_fold", True)):
++            # XPU patch: single-query decode without repeat_interleave. Query heads j*rep..j*rep+rep-1 share KV head
++            # j, so fold them into the query axis: (B, H, 1, D) -> (B, H_kv, rep, D). Same math, no K/V copies.
++            y = F.scaled_dot_product_attention(
++                q.reshape(bsz, self.n_local_heads, rep, self.head_dim), k, v, attn_mask=mask
++            ).reshape(bsz, self.n_head, 1, self.head_dim)
++            y = y.transpose(1, 2).contiguous().view(bsz, seqlen, q_size)
++            return self.wo(y)
++
++        k = k.repeat_interleave(rep, dim=1)
++        v = v.repeat_interleave(rep, dim=1)
+ 
+         if self.use_sdpa:
+             if mask is None:

@@ -1,0 +1,429 @@
+---
+# fish_speech -- S2-Pro voice cloning on the B70, as a container.
+#
+# This role was the native install: clone the pinned checkout, apply three XPU
+# patches to it, build a venv, install the XPU torch stack, run a
+# venv-interpreter clone probe, and run a systemd unit as root. The patches and
+# the venv are now build steps in the image
+# (roles/fish_speech/files/Dockerfile.j2), so the runtime is immutable and the
+# service no longer runs as root.
+#
+# What the role still owns:
+#   - the S2-Pro checkpoint on local disk (11 GB, NOT in the image)
+#   - the reference voice the service probe posts
+#   - the image build, guarded on a recipe label
+#   - the compose deploy, the image-id recreate, and the verification cycle
+
+- name: Resolve the render device group id
+  ansible.builtin.command:
+    cmd: stat -c '%g' /dev/dri/renderD128
+  register: arc_b70_render_gid_result
+  changed_when: false
+  failed_when: arc_b70_render_gid_result.rc != 0
+
+- name: Record the render device group id
+  ansible.builtin.set_fact:
+    arc_b70_render_gid: "{{ arc_b70_render_gid_result.stdout | trim }}"
+
+# -- checkpoint and reference voice (kept from the native role) --------------
+# The S2-Pro weights live in the app's own tree, on the fast local XFS -- not
+# on the NAS. This is a PRESENCE CHECK only: the download task is gone with the
+# venv its `hf` binary belonged to. The checkpoint is already on the host and
+# is the mount source for both containers, so a missing file is a real error
+# worth failing on, and a fetch would make checkpoint acquisition depend on a
+# container that is not up until after the deploy.
+- name: Verify the S2-Pro checkpoint is present
+  ansible.builtin.stat:
+    path: "{{ arc_b70_fish_ckpt }}/config.json"
+  register: arc_b70_fish_ckpt_stat
+  changed_when: false
+  failed_when: not arc_b70_fish_ckpt_stat.stat.exists
+
+- name: Create the reference voice directory
+  ansible.builtin.file:
+    path: "{{ arc_b70_fish_dir }}/references"
+    state: directory
+    mode: '0755'
+
+- name: Stage the reference voice
+  ansible.builtin.copy:
+    src: references/arc_b70_probe.wav
+    dest: "{{ arc_b70_fish_dir }}/references/arc_b70_probe.wav"
+    mode: '0644'
+
+# -- build context on the HOST ---------------------------------------------
+# linux-helpers is not present on kids-server, and a build context is a path on
+# the machine running the daemon. The context carries the rendered Dockerfile,
+# the three patches and the two requirement files -- the build cannot reach
+# outside its own directory, and COPY --from reads another stage or image, not
+# host paths.
+- name: Ensure the fish build context is present
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ arc_b70_fish_build_context }}"
+    - "{{ arc_b70_fish_build_context }}/patches"
+    - "{{ arc_b70_fish_build_context }}/requirements"
+
+# The three patches are copied byte-identical from the canonical copy at
+# roles/intel_gpu/files/b70-tts/patches/. The canonical patches are the diff
+# against upstream and the STOP RULES protect them, so a copy that drifted must
+# fail the role rather than silently change what the image contains.
+#
+# The comparison is made on the CONTROLLER, between the two copies in the repo:
+# that is the invariant worth guarding, and `copy` transfers the repo file
+# verbatim, so a match here is a match in the build context.
+- name: Read the canonical patch checksums
+  ansible.builtin.stat:
+    path: "{{ role_path }}/../intel_gpu/files/b70-tts/patches/{{ item }}"
+    checksum_algorithm: sha256
+  register: arc_b70_fish_patch_canon
+  delegate_to: localhost
+  changed_when: false
+  become: false
+  loop:
+    - fish-speech-xpu.patch
+    - fish-speech-api-xpu.patch
+    - fish-speech-webui-xpu.patch
+
+- name: Read the build-context patch checksums
+  ansible.builtin.stat:
+    path: "{{ role_path }}/files/patches/{{ item }}"
+    checksum_algorithm: sha256
+  register: arc_b70_fish_patch_ctx
+  delegate_to: localhost
+  changed_when: false
+  become: false
+  loop:
+    - fish-speech-xpu.patch
+    - fish-speech-api-xpu.patch
+    - fish-speech-webui-xpu.patch
+
+- name: Assert the build-context patches are byte-identical to the canonical copies
+  ansible.builtin.assert:
+    that:
+      - arc_b70_fish_patch_ctx.results | map(attribute='stat.checksum') | list
+        == arc_b70_fish_patch_canon.results | map(attribute='stat.checksum') | list
+    fail_msg: >-
+      A copy under roles/fish_speech/files/patches/ differs from the canonical
+      copy at roles/intel_gpu/files/b70-tts/patches/. The canonical patches are
+      the diff against upstream and must stay byte-identical.
+    quiet: true
+
+- name: Copy the three XPU patches into the fish build context
+  ansible.builtin.copy:
+    src: "patches/{{ item }}"
+    dest: "{{ arc_b70_fish_build_context }}/patches/{{ item }}"
+    mode: '0644'
+  loop:
+    - fish-speech-xpu.patch
+    - fish-speech-api-xpu.patch
+    - fish-speech-webui-xpu.patch
+
+# The requirement copies carry the whole XPU torch pin set (DR-9's single
+# source). They are byte-identical copies of the canonical files today, so
+# assert it the same way the patches are asserted -- otherwise a drifted copy
+# silently changes what the image installs.
+- name: Read the canonical requirement checksums
+  ansible.builtin.stat:
+    path: "{{ role_path }}/../intel_gpu/files/b70-tts/requirements/{{ item }}"
+    checksum_algorithm: sha256
+  loop: [xpu-torch.txt, fish.txt]
+  register: arc_b70_fish_req_canon
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Read the build-context requirement checksums
+  ansible.builtin.stat:
+    path: "{{ role_path }}/files/requirements/{{ item }}"
+    checksum_algorithm: sha256
+  loop: [xpu-torch.txt, fish.txt]
+  register: arc_b70_fish_req_ctx
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Assert the requirement copies are byte-identical to the canonical files
+  ansible.builtin.assert:
+    that:
+      - arc_b70_fish_req_ctx.results | map(attribute='stat.checksum') | list
+        == arc_b70_fish_req_canon.results | map(attribute='stat.checksum') | list
+    fail_msg: >-
+      A copy under roles/fish_speech/files/requirements/ differs from the
+      canonical copy at roles/intel_gpu/files/b70-tts/requirements/. Those pins
+      are the single source of the XPU torch stack per DR-9.
+    quiet: true
+
+- name: Copy the pinned requirement files into the fish build context
+  ansible.builtin.copy:
+    src: "requirements/{{ item }}"
+    dest: "{{ arc_b70_fish_build_context }}/requirements/{{ item }}"
+    mode: '0644'
+  loop:
+    - xpu-torch.txt
+    - fish.txt
+
+# The rendered Dockerfile must contain no unrendered Jinja: a raw
+# {{ arc_b70_xpu_torch_version }} would reach pip as a literal package name.
+#
+# src is an ABSOLUTE role_path, not a bare name: the template module searches
+# templates/, and this recipe lives in files/ beside the patches and
+# requirements it ships with, because it is build-context content rather than a
+# file deployed to the host.
+- name: Render the fish image recipe onto the host
+  ansible.builtin.template:
+    src: "{{ role_path }}/files/Dockerfile.j2"
+    dest: "{{ arc_b70_fish_build_context }}/Dockerfile"
+    mode: '0644'
+
+# -- recipe-label build guard (DR-8) ----------------------------------------
+- name: Compute the build recipe checksum
+  ansible.builtin.stat:
+    path: "{{ arc_b70_fish_build_context }}/Dockerfile"
+    checksum_algorithm: sha256
+  register: arc_b70_fish_recipe_files
+
+- name: Record the build recipe checksum
+  ansible.builtin.set_fact:
+    arc_b70_fish_recipe: >-
+      {{ (arc_b70_fish_recipe_files.stat.checksum
+          ~ arc_b70_fish_commit
+          ~ arc_b70_fish_image)
+         | hash('sha256') }}
+
+- name: Read the build recipe label from the current image
+  ansible.builtin.command:
+    cmd: >-
+      docker image inspect --format
+      '{{ '{{' }} index .Config.Labels "org.arcb70.recipe" {{ '}}' }}'
+      {{ arc_b70_fish_image }}
+  register: arc_b70_fish_image_recipe
+  changed_when: false
+  failed_when: false
+
+- name: Check whether the fish image already exists
+  ansible.builtin.command:
+    cmd: "docker image inspect {{ arc_b70_fish_image }}"
+  register: arc_b70_fish_image_state
+  changed_when: false
+  failed_when: false
+
+- name: Build the fish image
+  ansible.builtin.shell:
+    cmd: >-
+      docker build
+      --progress=plain
+      --label "org.arcb70.recipe={{ arc_b70_fish_recipe }}"
+      --build-arg FISH_COMMIT={{ arc_b70_fish_commit }}
+      -t {{ arc_b70_fish_image }}
+      . > {{ arc_b70_fish_build_log }} 2>&1
+    chdir: "{{ arc_b70_fish_build_context }}"
+    executable: /bin/bash
+  when: >-
+    arc_b70_fish_image_state.rc != 0
+    or arc_b70_fish_image_recipe.stdout | trim != arc_b70_fish_recipe | trim
+  changed_when: true
+
+- name: Report where the build log is
+  ansible.builtin.debug:
+    msg: "fish image build log: {{ arc_b70_fish_build_log }}"
+
+# The push must NOT be gated on the build condition alone. "The image changed"
+# and "the image is in the registry" are different facts -- an image built by
+# hand, or a registry that lost the repo, leaves a matching label, so a
+# build-gated push is skipped forever while the local image advertises a
+# RepoDigest the registry answers 404 for (measured on this host 2026-11-17 for
+# arc-b70/comfyui). Read the registry's own tag list and push when it is absent.
+- name: Read the registry's tags for the fish repository
+  ansible.builtin.command:
+    cmd: >-
+      curl -s --max-time 20
+      http://containers.x86experts.com:5000/v2/arc-b70/fish-speech/tags/list
+  register: arc_b70_fish_registry_tags
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Record whether that tag is already in the registry
+  ansible.builtin.set_fact:
+    arc_b70_fish_in_registry: >-
+      {{ (arc_b70_fish_registry_tags.stdout | default(''))
+         is search('"' ~ (arc_b70_fish_image | regex_replace('^.*:', '')) ~ '"') }}
+
+- name: Push the fish image to the registry
+  ansible.builtin.command:
+    cmd: "docker push {{ arc_b70_fish_image }}"
+  changed_when: true
+  when: >-
+    not arc_b70_fish_in_registry | bool
+    or arc_b70_fish_image_state.rc != 0
+    or arc_b70_fish_image_recipe.stdout | trim != arc_b70_fish_recipe | trim
+
+# -- compose deploy ---------------------------------------------------------
+# Both read-write mounts must be writable by UID 10001 or the container fails
+# its first write with EACCES: the POST /v1/tts output lands in
+# arc_b70_fishtts_out, and HF_HOME writes into arc_b70_fish_hf_cache. Verified
+# 2026-11-17: /opt/arc/fish/out was root:root 755 and /opt/arc/hf-cache did not
+# exist at all.
+- name: Ensure the fish writable mount points are owned by the container user
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: '10001'
+    group: '10001'
+    mode: '0755'
+  loop:
+    - "{{ arc_b70_fishtts_out }}"
+    - "{{ arc_b70_fish_hf_cache }}"
+
+- name: Deploy the fish compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ arc_b70_fish_deploy_dir }}/compose.yaml"
+    mode: '0644'
+
+- name: Compute the deployed compose file hash
+  ansible.builtin.stat:
+    path: "{{ arc_b70_fish_deploy_dir }}/compose.yaml"
+    checksum_algorithm: sha256
+  register: arc_b70_fish_compose_stat
+  changed_when: false
+
+- name: Read the recorded compose file hash
+  ansible.builtin.slurp:
+    src: "{{ arc_b70_fish_deploy_dir }}/compose.yaml.sha256"
+  register: arc_b70_fish_compose_sidecar
+  changed_when: false
+  failed_when: false
+
+- name: Record whether the compose file content changed
+  ansible.builtin.set_fact:
+    arc_b70_fish_compose_changed: >-
+      {{ arc_b70_fish_compose_sidecar.content is not defined
+         or (arc_b70_fish_compose_sidecar.content | b64decode | trim)
+            != (arc_b70_fish_compose_stat.stat.checksum | default('')) }}
+
+- name: Read the image id the running fish-api container was created from
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.Image{{ '}}' }}' fish-api"
+  register: arc_b70_fish_running_image
+  changed_when: false
+  failed_when: false
+
+- name: Read the image id of the current fish image
+  ansible.builtin.command:
+    cmd: "docker image inspect -f '{{ '{{' }}.Id{{ '}}' }}' {{ arc_b70_fish_image }}"
+  register: arc_b70_fish_current_image
+  changed_when: false
+  failed_when: false
+
+- name: Check whether the fish-api container exists
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' fish-api"
+  register: arc_b70_fish_api_state
+  changed_when: false
+  failed_when: false
+
+# The condition is about IDENTITY, never about whether the containers happen to
+# be running: the role's steady state is "both exist, STOPPED", so a "not
+# running" term would report changed=1 on every run.
+- name: Create or recreate the fish containers
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_fish_deploy_dir }}/compose.yaml up -d --force-recreate"
+    chdir: "{{ arc_b70_fish_dir }}"
+  when: >-
+    arc_b70_fish_api_state.rc != 0
+    or arc_b70_fish_running_image.stdout | trim != arc_b70_fish_current_image.stdout | trim
+    or arc_b70_fish_compose_changed | bool
+  changed_when: true
+
+- name: Record the applied compose file hash
+  ansible.builtin.copy:
+    content: "{{ arc_b70_fish_compose_stat.stat.checksum | default('') }}\n"
+    dest: "{{ arc_b70_fish_deploy_dir }}/compose.yaml.sha256"
+    mode: '0644'
+  # Only record a hash that exists: in --check mode the compose file is not
+  # actually written, so the stat has no checksum and there is nothing to record.
+  when: >-
+    arc_b70_fish_compose_changed | bool
+    and arc_b70_fish_compose_stat.stat.checksum is defined
+
+# -- verification cycle -----------------------------------------------------
+- name: Start the fish containers for the acceptance checks
+  when: not ansible_check_mode
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_fish_deploy_dir }}/compose.yaml start"
+  changed_when: arc_b70_gpu_services_persistent | bool
+
+# The api_server loads S2-Pro and warms it up BEFORE uvicorn binds the socket
+# -- measured ~6 minutes on the B70. 150 x 10 s = 25 min. The native role's
+# 60 x 5 s (5 min) would time out against a perfectly healthy server, so the
+# budget is deliberately longer here.
+- name: Wait for the Fish API to answer
+  when: not ansible_check_mode
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_fishtts_api_port }}/v1/health"
+  register: arc_b70_fish_health
+  until: arc_b70_fish_health.status == 200
+  retries: 150
+  delay: 10
+
+# The XPU assertion is the api_server's OWN startup log, not an inference
+# benchmark: model_manager.py falls back to the CPU whenever CUDA is absent, and
+# a CPU fallback still serves requests. The log line is the only thing that
+# distinguishes the two before a request is made.
+#
+# docker logs is naturally scoped to THIS container's activation, so unlike the
+# native journalctl form no timestamp boundary is needed.
+#
+# 2>&1 is load-bearing, not cosmetic: the api_server logs through loguru, which
+# writes to STDERR. `docker logs` without the merge puts the "XPU is available,
+# running on Intel(R) Arc(TM) Pro B70 Graphics." line on stderr and leaves
+# stdout with only the ANSI-coloured tokenizer chatter -- so the assertion below
+# would fail against a server that is perfectly healthy and genuinely on the
+# GPU. Verified on the B70 2026-11-17:
+#   docker logs fish-api 2>/dev/null | grep -c 'XPU is available'   -> 0
+#   docker logs fish-api 2>&1 >/dev/null | grep -c 'XPU is available' -> 1
+- name: Read the api_server startup log
+  when: not ansible_check_mode
+  ansible.builtin.shell:
+    cmd: "docker logs fish-api 2>&1"
+    executable: /bin/bash
+  register: arc_b70_fish_log
+  changed_when: false
+
+- name: Assert the api_server is running on the XPU
+  when: not ansible_check_mode
+  ansible.builtin.assert:
+    that:
+      - "'running on Intel(R) Arc(TM) Pro B70' in arc_b70_fish_log.stdout"
+      - "'running on CPU' not in arc_b70_fish_log.stdout"
+    fail_msg: >-
+      The api_server did not report running on the B70. It must log
+      "XPU is available, running on Intel(R) Arc(TM) Pro B70 ..." and must NOT
+      log "running on CPU". Container log:
+      {{ arc_b70_fish_log.stdout_lines | default([]) | join('\n') }}
+    quiet: true
+
+- name: Assert the fish containers run as the unprivileged user
+  when: not ansible_check_mode
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.Config.User{{'}}' }}' fish-api fish-webui"
+  register: arc_b70_fish_users
+  changed_when: false
+  failed_when: >-
+    arc_b70_fish_users.stdout_lines | select('ne', '10001:10001') | list | length > 0
+
+# The api_server is verified above, then left stopped. It holds about 20 GiB of
+# the card's VRAM and is not needed between sessions -- and the b70q queue
+# refuses to grant the card while anything holds VRAM outside the queue.
+- name: Stop the fish containers after the acceptance check
+  when:
+    - not ansible_check_mode
+    - not arc_b70_gpu_services_persistent
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_fish_deploy_dir }}/compose.yaml stop"
+  changed_when: false

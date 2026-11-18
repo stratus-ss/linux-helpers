@@ -1,0 +1,185 @@
+---
+# fishtts_service -- the FishTTS WebUI, as a container, plus the clone probe.
+#
+# The WebUI is a SEPARATE entry point from the api_server (upstream ships
+# tools/run_webui.py, which builds its own model stack and does not go through
+# tools/server/model_manager.py). Both now run from the same image (DR-3) but as
+# two containers, and both end STOPPED so the b70q queue can grant the card.
+#
+# The clone probe is KEPT UNCHANGED IN SUBSTANCE. It is a POST to the deployed
+# service's /v1/tts over its real protocol -- which is strictly stronger than
+# exec'ing a script inside the container, because it proves the service answers
+# rather than that the image's Python can import torch. It also needs no host
+# venv, so it survives the venv's removal.
+#
+# The three XPU patches are baked into the image now, so this role no longer
+# applies the WebUI patch to a checkout.
+
+- name: Resolve the render device group id
+  ansible.builtin.command:
+    cmd: stat -c '%g' /dev/dri/renderD128
+  register: arc_b70_render_gid_result
+  changed_when: false
+  failed_when: arc_b70_render_gid_result.rc != 0
+
+- name: Record the render device group id
+  ansible.builtin.set_fact:
+    arc_b70_render_gid: "{{ arc_b70_render_gid_result.stdout | trim }}"
+
+# One parent for the fish stack's deploy state and output. The old
+# arc_b70_fishtts_dir (/opt/arc/fishtts) was a second name for the same thing,
+# created here and then never read by any task -- removed rather than left as a
+# duplicate.
+- name: Ensure the FishTTS service tree is present
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ arc_b70_fish_deploy_dir }}"
+    - "{{ arc_b70_fishtts_out }}"
+
+# The checkpoint is ~11 GB and is staged by the fish_speech role; this role must
+# not run first. A missing checkpoint is a real error -- the container would
+# start and then fail the model load, which is a much less obvious symptom.
+- name: Verify the S2-Pro checkpoint is present
+  ansible.builtin.stat:
+    path: "{{ arc_b70_fishtts_checkpoint }}/config.json"
+  register: arc_b70_fishtts_ckpt_stat
+  changed_when: false
+  failed_when: not arc_b70_fishtts_ckpt_stat.stat.exists
+
+# The out directory is a read-write mount for both containers, and the clone
+# below writes into it as UID 10001. Verified 2026-11-17: it existed as
+# root:root 755, which would have failed the POST's write with EACCES.
+- name: Ensure the FishTTS output directory is owned by the container user
+  ansible.builtin.file:
+    path: "{{ arc_b70_fishtts_out }}"
+    state: directory
+    owner: '10001'
+    group: '10001'
+    mode: '0755'
+
+# -- verification cycle -----------------------------------------------------
+# Both containers are started for the acceptance checks and stopped at the end.
+# The fish_speech role deploys the compose file and does the image-id recreate;
+# this role only starts the pair, proves them, and stops them.
+- name: Start the fish containers for the acceptance checks
+  when: not ansible_check_mode
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_fish_deploy_dir }}/compose.yaml start"
+  changed_when: arc_b70_gpu_services_persistent | bool
+
+# The api_server loads S2-Pro and warms it up BEFORE uvicorn binds: ~6 minutes
+# measured on the B70. 150 x 10 s = 25 min.
+- name: Wait for the api_server to answer
+  when: not ansible_check_mode
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_fishtts_api_port }}/v1/health"
+  register: arc_b70_fishtts_health
+  until: arc_b70_fishtts_health.status == 200
+  retries: 150
+  delay: 10
+
+# The WebUI loads S2-Pro SEPARATELY (it does not reuse the api_server's model),
+# so it has its own full load. 120 x 10 s = 20 min.
+- name: Wait for the WebUI to answer
+  when: not ansible_check_mode
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_fishtts_webui_port }}/"
+  register: arc_b70_fishtts_webui
+  until: arc_b70_fishtts_webui.status == 200
+  retries: 120
+  delay: 10
+
+# The assertion that separates a correct build from a silent CPU fallback. The
+# journal I used for the native unit is replaced by `docker logs`, which is
+# naturally scoped to THIS container's activation -- no timestamp boundary is
+# needed, and a previous CPU run cannot leak into it.
+# 2>&1 is load-bearing, not cosmetic: the WebUI logs through loguru, which
+# writes to STDERR. `docker logs` without the merge leaves stdout holding only
+# the ANSI-coloured model chatter, so the assertion below would fail against a
+# WebUI that is genuinely on the card. Measured on the B70 2026-11-17:
+#   docker logs fish-webui 2>/dev/null | grep -c 'running on Intel'  -> 0
+#   docker logs fish-webui 2>&1        | grep -c 'running on Intel'  -> 2
+# The sibling role fish_speech carries the same fix (commit 2ca7ef9).
+- name: Read the WebUI startup log
+  ansible.builtin.shell:
+    cmd: "docker logs fish-webui 2>&1"
+    executable: /bin/bash
+  register: arc_b70_webui_log
+  changed_when: false
+
+- name: Assert the WebUI really runs on the XPU
+  when: not ansible_check_mode
+  ansible.builtin.assert:
+    that:
+      - arc_b70_webui_log.stdout is search('XPU is available, running on Intel\(R\) Arc\(TM\) Pro B70')
+      - "'running on CPU' not in arc_b70_webui_log.stdout"
+    fail_msg: >-
+      The WebUI answered on 127.0.0.1:{{ arc_b70_fishtts_webui_port }} but its log
+      does not name the B70 -- it is running on another device. Log tail:
+      {{ arc_b70_webui_log.stdout | default('') | truncate(300) }}
+    success_msg: "WebUI confirmed on the Arc Pro B70."
+
+- name: Record the WebUI device
+  ansible.builtin.debug:
+    msg: >-
+      {{ arc_b70_webui_log.stdout_lines
+         | select('search', 'running on')
+         | list | join(' | ') }}
+
+# -- acceptance: a real clone through the SERVICE, not a host venv ----------
+# POST /v1/tts takes JSON: text, references[{audio(b64), text}], format.
+# slurp yields the reference WAV already base64-encoded, which is exactly the
+# encoding the endpoint expects for the bytes field.
+- name: Read the reference voice for the service probe
+  ansible.builtin.slurp:
+    src: "{{ arc_b70_fish_dir }}/references/arc_b70_probe.wav"
+  register: arc_b70_fishtts_ref_audio
+
+# The POST OVERWRITES this file on every play. There is deliberately no
+# existence guard: a stale file from an earlier run must never satisfy the
+# probe, and the mtime check on Task 9's side is what makes the fixed name
+# assertable.
+- name: Verify a real voice clone through the api_server
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_fishtts_api_port }}/v1/tts"
+    method: POST
+    body_format: json
+    body:
+      text: "The quick brown fox jumps over the lazy dog."
+      format: wav
+      references:
+        - audio: "{{ arc_b70_fishtts_ref_audio.content }}"
+          text: "Reference voice for the acceptance check."
+    dest: "{{ arc_b70_fishtts_out }}/arc_b70_service_clone.wav"
+    status_code: 200
+    # The uri module's default timeout is 30 s. A clone is slower than that:
+    # the api_server's own journal shows 22.82 s for 72 tokens of generation
+    # (3.15 tok/s) BEFORE the VQ decode, so the request routinely outlives the
+    # default. Without this the client aborts at 30 s while the server goes on
+    # to answer 200 -- the probe reports a timeout for work that succeeded.
+    timeout: 300
+  register: arc_b70_fishtts_clone
+  changed_when: false
+
+- name: Verify the service clone duration
+  ansible.builtin.command:
+    cmd: "ffprobe -v error -show_entries format=duration -of csv=p=0 {{ arc_b70_fishtts_out }}/arc_b70_service_clone.wav"
+  register: arc_b70_fishtts_clone_probe
+  changed_when: false
+  failed_when: (arc_b70_fishtts_clone_probe.stdout | float) <= 0.5
+
+# Both services are verified above, then left stopped. They are long-lived GPU
+# servers that hold most of the card's VRAM, and the b70q queue refuses to grant
+# the card while anything holds VRAM outside the queue.
+- name: Stop the FishTTS services after the acceptance check
+  when:
+    - not ansible_check_mode
+    - not arc_b70_gpu_services_persistent
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_fish_deploy_dir }}/compose.yaml stop"
+  # The matching stop of the verification cycle above. Restores the state the
+  # play found, so it is not drift either.
+  changed_when: false
