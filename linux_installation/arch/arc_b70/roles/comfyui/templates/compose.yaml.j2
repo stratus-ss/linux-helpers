@@ -1,0 +1,58 @@
+# ComfyUI as a container.
+#
+# The shape (devices + group_add + 127.0.0.1 port prefix) is the one already
+# running on this host for frigate, whisper-webui and ebook2audiobook -- not a
+# new variant.
+#
+# --listen 0.0.0.0 INSIDE the container is correct and must not be "fixed" to
+# 127.0.0.1: the host side of the port mapping below is what enforces
+# loopback-only. Binding 127.0.0.1 inside the container's own network namespace
+# would make the port unreachable through the mapping.
+#
+# restart: "no" is mandatory (DR-4). The role starts this container so it can
+# prove the XPU works, then stops it. "unless-stopped" would fight both that
+# and the b70q queue, which refuses to grant the card while anything holds VRAM
+# outside the queue.
+# Pin the compose PROJECT name. Without it it is derived from the
+# containing directory, so moving the file renames the project -- which
+# makes `compose up` try to CREATE containers whose names are still held
+# by the old project, and fails with 'name is already in use'.
+name: arc-b70-comfyui
+
+services:
+  comfyui:
+    container_name: comfyui
+    image: {{ arc_b70_comfyui_image }}
+    user: "10001:10001"
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "{{ arc_b70_render_gid }}"
+    volumes:
+      # Models are READ-ONLY: the container never writes into the 121 GB set.
+      - {{ arc_b70_comfyui_models_dir }}:/opt/comfyui/models:ro
+      # These three are read-write: ComfyUI writes renders, uploaded inputs and
+      # its UI/user state. The role creates them owned by UID 10001.
+      - {{ arc_b70_comfyui_dir }}/output:/opt/comfyui/output
+      - {{ arc_b70_comfyui_dir }}/input:/opt/comfyui/input
+      - {{ arc_b70_comfyui_dir }}/user:/opt/comfyui/user
+    ports:
+      - "127.0.0.1:{{ arc_b70_comfyui_port }}:8188"
+    # ComfyUI is multi-threaded and its workers share memory; docker's 64 MB
+    # default /dev/shm is small enough to crash a render rather than fail it
+    # cleanly.
+    shm_size: "2gb"
+    restart: "no"
+    command:
+      - /opt/venv/bin/python
+      - main.py
+      - --listen
+      - 0.0.0.0
+      - --port
+      - "8188"
+      # The same three flags the native unit used. --disable-pinned-memory and
+      # --fp32-vae are what made this model run on the B70 at all; dropping
+      # them silently changes the render's memory behaviour.
+      - --disable-pinned-memory
+      - --fp32-vae
+      - --use-pytorch-cross-attention

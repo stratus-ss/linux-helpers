@@ -1,0 +1,400 @@
+---
+# comfyui -- build the image, deploy the container, prove the XPU, stop it.
+#
+# This role was the native install: a venv, three custom-node clones whose
+# CUDA-only requirements had to be filtered at install time, and a systemd
+# unit. All of that now lives in the image (roles/comfyui/files/Dockerfile.j2),
+# so the filtering is a build step that runs once and the runtime is immutable.
+#
+# What the role still owns:
+#   - the 121 GB model set on local disk (it is NOT in the image)
+#   - the image build, guarded on a recipe label
+#   - the compose deploy, the image-id recreate, and the verification cycle
+#
+# The role's steady state is "container exists, STOPPED" (DR-4): it starts the
+# container to prove it works, then stops it so b70q can grant the card.
+
+- name: Resolve the render device group id
+  ansible.builtin.command:
+    cmd: stat -c '%g' /dev/dri/renderD128
+  register: arc_b70_render_gid_result
+  changed_when: false
+  failed_when: arc_b70_render_gid_result.rc != 0
+
+- name: Record the render device group id
+  ansible.builtin.set_fact:
+    arc_b70_render_gid: "{{ arc_b70_render_gid_result.stdout | trim }}"
+
+# The 121 GB set is already on the NAS, byte-verified against the desktop.
+# Copy it onto the B70's local XFS so ComfyUI reads weights at local disk speed
+# instead of over NFS.
+#
+# A tar pipe, not rsync: rsync's per-file round-trips over NFS manage only
+# ~28 MB/s here, while a single sequential read of the same tree streams at
+# ~95 MB/s (measured on a 17 GB file). One pass, no per-file overhead.
+#
+# The `creates:`-style guard is load-bearing: without it every play would
+# re-copy 121 GB.
+- name: Check whether the ComfyUI model set is already on the local disk
+  ansible.builtin.stat:
+    path: "{{ arc_b70_comfyui_models_dir }}/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+  register: arc_b70_comfyui_models_present
+  changed_when: false
+
+- name: Copy the ComfyUI model set from the NAS to the local disk
+  ansible.builtin.shell:
+    cmd: "tar -C {{ arc_b70_models_mount }} -cf - . | tar -C {{ arc_b70_comfyui_models_dir }} -xf -"
+  when: not arc_b70_comfyui_models_present.stat.exists
+  changed_when: true
+
+- name: Verify the local model set
+  ansible.builtin.stat:
+    path: "{{ arc_b70_comfyui_models_dir }}/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+  register: arc_b70_comfyui_models_local
+  changed_when: false
+  failed_when: not arc_b70_comfyui_models_local.stat.exists
+
+# -- build context on the HOST ---------------------------------------------
+# linux-helpers is not present on kids-server, and a build context is a path
+# on the machine running the daemon. The role renders its recipe there and
+# builds with that path as the context -- the same shape the ebook2audiobook
+# role already uses.
+#
+# The context holds ONLY the recipe, the workflow and .dockerignore. The 121 GB
+# model tree is never part of it (.dockerignore also excludes models/ as a
+# second line of defence).
+- name: Ensure the ComfyUI build context is present
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ arc_b70_comfyui_build_context }}"
+    - "{{ arc_b70_comfyui_build_context }}/workflows"
+    - "{{ arc_b70_comfyui_dir }}/output"
+    - "{{ arc_b70_comfyui_dir }}/input"
+    - "{{ arc_b70_comfyui_dir }}/user"
+
+# The schema migration from the native install: three directories the container
+# writes are created here owned by UID 10001. Without this the non-root
+# container fails its first write with EACCES, and a render fails rather than
+# producing an empty file.
+- name: Ensure the writable mount points are owned by the container user
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: '10001'
+    group: '10001'
+    mode: '0755'
+  loop:
+    - "{{ arc_b70_comfyui_dir }}/output"
+    - "{{ arc_b70_comfyui_dir }}/input"
+    - "{{ arc_b70_comfyui_dir }}/user"
+
+- name: Deploy the ComfyUI probe workflow into the build context
+  ansible.builtin.copy:
+    src: workflows/h3_probe_api.json
+    dest: "{{ arc_b70_comfyui_build_context }}/workflows/h3_probe_api.json"
+    mode: '0644'
+
+- name: Deploy the ComfyUI build ignore file
+  ansible.builtin.copy:
+    src: .dockerignore
+    dest: "{{ arc_b70_comfyui_build_context }}/.dockerignore"
+    mode: '0644'
+
+# The rendered Dockerfile must contain no unrendered Jinja: a raw
+# {{ arc_b70_xpu_torch_version }} would reach pip as a literal package name and
+# fail the build with an unparseable requirement.
+#
+# src is an ABSOLUTE role_path, not a bare name: the template module searches
+# templates/, and this recipe deliberately lives in files/ beside the
+# .dockerignore and workflows/ it ships with, because it is build-context
+# content rather than a file deployed to the host. A bare "Dockerfile.j2" fails
+# with "Could not find or access 'Dockerfile.j2'".
+- name: Render the ComfyUI image recipe onto the host
+  ansible.builtin.template:
+    src: "{{ role_path }}/files/Dockerfile.j2"
+    dest: "{{ arc_b70_comfyui_build_context }}/Dockerfile"
+    mode: '0644'
+
+# -- recipe-label build guard (DR-8) ----------------------------------------
+# The recipe is identified by the hash of the rendered Dockerfile plus the four
+# custom-node build args. The tag does not change when the image is rebuilt
+# under it, so a presence check cannot tell a current image from a stale one.
+- name: Compute the build recipe checksum
+  ansible.builtin.stat:
+    path: "{{ arc_b70_comfyui_build_context }}/Dockerfile"
+    checksum_algorithm: sha256
+  register: arc_b70_comfyui_recipe_files
+
+- name: Record the build recipe checksum
+  ansible.builtin.set_fact:
+    # Hashed, not concatenated: a label value has to be a single shell token.
+    # The parentheses matter -- without them the | hash filter binds to the
+    # first term alone.
+    arc_b70_comfyui_recipe: >-
+      {{ (arc_b70_comfyui_recipe_files.stat.checksum
+          ~ arc_b70_comfyui_version
+          ~ arc_b70_comfyui_image)
+         | hash('sha256') }}
+
+- name: Read the build recipe label from the current image
+  ansible.builtin.command:
+    cmd: >-
+      docker image inspect --format
+      '{{ '{{' }} index .Config.Labels "org.arcb70.recipe" {{ '}}' }}'
+      {{ arc_b70_comfyui_image }}
+  register: arc_b70_comfyui_image_recipe
+  changed_when: false
+  failed_when: false
+
+- name: Check whether the ComfyUI image already exists
+  ansible.builtin.command:
+    cmd: "docker image inspect {{ arc_b70_comfyui_image }}"
+  register: arc_b70_comfyui_image_state
+  changed_when: false
+  failed_when: false
+
+# The build writes its own log rather than returning its output to Ansible: a
+# docker build's output is large, and without --progress=plain it is a stream
+# of carriage-return progress lines that Ansible buffers in full. The log is
+# also the instrument that diagnosed every image defect on this host.
+- name: Build the ComfyUI image
+  ansible.builtin.shell:
+    cmd: >-
+      docker build
+      --progress=plain
+      --label "org.arcb70.recipe={{ arc_b70_comfyui_recipe }}"
+      --build-arg COMFYUI_VERSION={{ arc_b70_comfyui_version }}
+      -t {{ arc_b70_comfyui_image }}
+      . > {{ arc_b70_comfyui_build_log }} 2>&1
+    chdir: "{{ arc_b70_comfyui_build_context }}"
+    executable: /bin/bash
+  when: >-
+    arc_b70_comfyui_image_state.rc != 0
+    or arc_b70_comfyui_image_recipe.stdout | trim != arc_b70_comfyui_recipe | trim
+  changed_when: true
+
+- name: Report where the build log is
+  ansible.builtin.debug:
+    msg: "ComfyUI image build log: {{ arc_b70_comfyui_build_log }}"
+
+# The build alone is not enough: the plan's end state is a pushed,
+# digest-pinnable image.
+#
+# The push must NOT be gated on the build condition. "The image changed" and
+# "the image is in the registry" are different facts: an image built by hand,
+# or a registry that lost the repo, leaves a label that matches -- so a
+# build-gated push is skipped forever and the local image keeps advertising a
+# RepoDigest the registry answers 404 for. Measured on this host 2026-11-17:
+# `arc-b70/comfyui` returned NAME_UNKNOWN while its local image carried
+# RepoDigests for it.
+#
+# So: read the registry's own tag list, and push when the tag is absent.
+- name: Read the registry's tags for the ComfyUI repository
+  ansible.builtin.command:
+    cmd: >-
+      curl -s --max-time 20
+      http://containers.x86experts.com:5000/v2/arc-b70/comfyui/tags/list
+  register: arc_b70_comfyui_registry_tags
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Record whether the ComfyUI tag is already in the registry
+  ansible.builtin.set_fact:
+    arc_b70_comfyui_in_registry: >-
+      {{ (arc_b70_comfyui_registry_tags.stdout | default(''))
+         is search('"' ~ (arc_b70_comfyui_image | regex_replace('^.*:', '')) ~ '"') }}
+
+- name: Push the ComfyUI image to the registry
+  ansible.builtin.command:
+    cmd: "docker push {{ arc_b70_comfyui_image }}"
+  changed_when: true
+  when: >-
+    not arc_b70_comfyui_in_registry | bool
+    or arc_b70_comfyui_image_state.rc != 0
+    or arc_b70_comfyui_image_recipe.stdout | trim != arc_b70_comfyui_recipe | trim
+
+- name: Assert the ComfyUI image really reached the registry
+  ansible.builtin.command:
+    cmd: >-
+      curl -s --max-time 20
+      http://containers.x86experts.com:5000/v2/arc-b70/comfyui/tags/list
+  register: arc_b70_comfyui_registry_after
+  changed_when: false
+  check_mode: false
+  failed_when: >-
+    (arc_b70_comfyui_image | regex_replace('^.*:', ''))
+    not in arc_b70_comfyui_registry_after.stdout
+
+# -- compose deploy ---------------------------------------------------------
+- name: Deploy the ComfyUI compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ arc_b70_comfyui_dir }}/compose.yaml"
+    mode: '0644'
+
+# compose_config_changed is derived from a SIDECAR, not from a label inside the
+# compose file: the compose tool treats an unknown key as an error, and a file
+# that carries its own hash cannot be hashed.
+#
+# The hash is taken from the RENDERED FILE ON DISK, not from a second template
+# render: that is the artifact the daemon will actually read.
+#
+# A missing sidecar (a host where the compose file has never been applied)
+# counts as changed, so the first run applies the file and writes the sidecar.
+# After that the sidecar matches and the term is false.
+- name: Compute the deployed compose file hash
+  ansible.builtin.stat:
+    path: "{{ arc_b70_comfyui_dir }}/compose.yaml"
+    checksum_algorithm: sha256
+  register: arc_b70_comfyui_compose_stat
+  changed_when: false
+
+- name: Read the recorded compose file hash
+  ansible.builtin.slurp:
+    src: "{{ arc_b70_comfyui_dir }}/compose.yaml.sha256"
+  register: arc_b70_comfyui_compose_sidecar
+  changed_when: false
+  failed_when: false
+
+- name: Record whether the compose file content changed
+  ansible.builtin.set_fact:
+    arc_b70_comfyui_compose_changed: >-
+      {{ arc_b70_comfyui_compose_sidecar.content is not defined
+         or (arc_b70_comfyui_compose_sidecar.content | b64decode | trim)
+            != (arc_b70_comfyui_compose_stat.stat.checksum | default('')) }}
+
+- name: Check the ComfyUI container's state
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' comfyui"
+  register: arc_b70_comfyui_state
+  changed_when: false
+  failed_when: false
+
+# The container MUST be recreated when the image was rebuilt under the same
+# tag: "docker compose up -d" sees the same image REFERENCE and leaves the old
+# container running -- with the OLD image.
+- name: Read the image id the running container was created from
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.Image{{ '}}' }}' comfyui"
+  register: arc_b70_comfyui_running_image
+  changed_when: false
+  failed_when: false
+
+- name: Read the image id of the current image
+  ansible.builtin.command:
+    cmd: "docker image inspect -f '{{ '{{' }}.Id{{ '}}' }}' {{ arc_b70_comfyui_image }}"
+  register: arc_b70_comfyui_current_image
+  changed_when: false
+  failed_when: false
+
+# The condition is about the container's IDENTITY, never about whether it
+# happens to be running. The role's steady state is "container exists,
+# STOPPED", so "not running" is true at the start of every play after the
+# first -- a condition that included it would report changed=1 on every run and
+# Task 11's changed=0 would be unreachable.
+#
+# compose_config_changed is the third term, and it is not optional: without it
+# a compose edit (a new volume, a changed port, a changed command) would never
+# be applied, because the container's identity is unchanged and the condition
+# is false. The role would silently keep the old configuration forever -- a
+# green changed=0 that hides real drift.
+- name: Create or recreate the ComfyUI container
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_comfyui_dir }}/compose.yaml up -d --force-recreate"
+    chdir: "{{ arc_b70_comfyui_dir }}"
+  when: >-
+    arc_b70_comfyui_state.rc != 0
+    or arc_b70_comfyui_running_image.stdout | trim != arc_b70_comfyui_current_image.stdout | trim
+    or arc_b70_comfyui_compose_changed | bool
+  changed_when: true
+
+- name: Record the applied compose file hash
+  ansible.builtin.copy:
+    content: "{{ arc_b70_comfyui_compose_stat.stat.checksum | default('') }}\n"
+    dest: "{{ arc_b70_comfyui_dir }}/compose.yaml.sha256"
+    mode: '0644'
+  # Only record a hash that exists: in --check mode the compose file is not
+  # actually written, so the stat has no checksum and there is nothing to record.
+  when: >-
+    arc_b70_comfyui_compose_changed | bool
+    and arc_b70_comfyui_compose_stat.stat.checksum is defined
+
+# -- verification cycle -----------------------------------------------------
+# This task starts the container so the tasks below can prove it works, and the
+# role stops it again at the end. With gpu_services_persistent=false the net
+# effect on the machine is nil, so it is not drift and must not be reported as
+# changed -- otherwise a converging play can never report changed=0.
+#
+# The expression keeps it honest: if persistent is turned on, the start IS the
+# change and is reported as such.
+- name: Start ComfyUI for the acceptance checks
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_comfyui_dir }}/compose.yaml start"
+  changed_when: arc_b70_gpu_services_persistent | bool
+
+- name: Wait for ComfyUI to answer
+  when: not ansible_check_mode
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_comfyui_port }}/system_stats"
+    return_content: true
+  register: arc_b70_comfyui_stats
+  until: arc_b70_comfyui_stats.status == 200
+  retries: 60
+  delay: 5
+
+# Two-part assertion, both parts mandatory: a CPU device would also pass the
+# name check, so the type field is the discriminator. A missing type key is a
+# BLOCKING failure -- do not weaken this to name-only.
+- name: Assert the XPU device is selected
+  when: not ansible_check_mode
+  ansible.builtin.assert:
+    that:
+      - arc_b70_comfyui_stats.json.devices | selectattr('name', 'search', 'Intel') | list | length > 0
+      - arc_b70_comfyui_stats.json.devices | selectattr('type', 'defined') | selectattr('type', 'equalto', 'xpu') | list | length > 0
+    fail_msg: >-
+      ComfyUI is not running on the XPU device. Response devices:
+      {{ arc_b70_comfyui_stats.json.devices }}
+    quiet: true
+
+# The container's OWN interpreter, read from inside the container with the
+# device passed through. This is the assertion a build layer cannot make: a
+# build has no /dev/dri, so torch.xpu.is_available() there is False by
+# construction.
+- name: Assert the container's own torch reports a usable XPU
+  ansible.builtin.command:
+    cmd: >-
+      docker exec comfyui /opt/venv/bin/python -c
+      "import torch; print(torch.__version__); print(torch.xpu.device_count()); print(torch.xpu.is_available())"
+  register: arc_b70_comfyui_torch
+  changed_when: false
+  failed_when: >-
+    '+xpu' not in arc_b70_comfyui_torch.stdout
+    or 'True' not in arc_b70_comfyui_torch.stdout
+
+- name: Record the container's torch version
+  ansible.builtin.debug:
+    msg: "{{ arc_b70_comfyui_torch.stdout_lines | default([]) | join(' | ') }}"
+
+- name: Assert the container runs as the unprivileged user
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.Config.User{{ '}}' }}' comfyui"
+  register: arc_b70_comfyui_user
+  changed_when: false
+  failed_when: arc_b70_comfyui_user.stdout | trim != '10001:10001'
+
+# ComfyUI is verified above, then left stopped. It holds a large slice of the
+# card's VRAM and is not needed between sessions -- and the b70q queue refuses
+# to grant the card while anything holds VRAM outside the queue.
+- name: Stop ComfyUI after the acceptance check
+  when:
+    - not ansible_check_mode
+    - not arc_b70_gpu_services_persistent
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_comfyui_dir }}/compose.yaml stop"
+  # The matching stop of the verification cycle above. Restores the state the
+  # play found, so it is not drift either.
+  changed_when: false

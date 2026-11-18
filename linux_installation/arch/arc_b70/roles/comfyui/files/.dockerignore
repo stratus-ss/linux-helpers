@@ -1,0 +1,18 @@
+# The build context is /opt/arc/comfyui/build/ on the host, which holds only
+# the rendered Dockerfile, workflows/ and this file. The 121 GB model set lives
+# at /opt/arc/comfyui/models and is NEVER part of the build context.
+#
+# This file is not decoration. Without it a stray copy of a model directory
+# into the context -- by a future task, or by someone debugging a mount
+# problem -- would be sent to the daemon and baked into the image. That is the
+# one thing STOP RULES forbid outright.
+models/
+output/
+input/
+user/
+temp/
+*.safetensors
+*.ckpt
+*.pth
+*.bin
+*.onnx

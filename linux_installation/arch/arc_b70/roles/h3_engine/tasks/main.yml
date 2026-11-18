@@ -1,0 +1,300 @@
+---
+# h3_engine -- the reference's patched stable-diffusion.cpp SYCL build.
+#
+# This role is a SPIKE: the plan says its failure must not stop the run. The
+# builds are wrapped in a block/rescue so a failed compile ends the play with
+# "H3 engine: BLOCKED" instead of aborting the remaining plays.
+
+- name: Ensure the SYCL build toolchain is present
+  ansible.builtin.pacman:
+    name:
+      - base-devel
+      - cmake
+      - ninja
+      - git
+      - pkgconf
+      - shaderc
+      - vulkan-headers
+      - vulkan-tools
+      # The oneDNN and sd.cpp SYCL builds need Intel's DPC++/C++ compiler
+      # (icx / icpx). CMake fails with "The CMAKE_C_COMPILER: icx is not a
+      # full path and was not found in the PATH" without it. Arch ships it
+      # as intel-oneapi-dpcpp-cpp.
+      - intel-oneapi-dpcpp-cpp
+    state: present
+
+# The vendored build scripts expect a manually unpacked oneAPI 2025.3 under
+# $HOME/opt, and they hard-code two versioned SUBPATHS of $ONEAPI:
+#   CMPLR=$ONEAPI/compiler/2025.3
+#   UMF=$ONEAPI/umf/1.0/lib
+# Arch's packages install a different layout (/opt/intel/oneapi/compiler/2026.2,
+# /opt/intel/oneapi/umf/1.2), and only ONEAPI is overridable by environment --
+# the versioned subpaths are not.
+#
+# A shim directory supplies the expected subpaths as symlinks to the real
+# installation. The vendored scripts are NOT modified: they are upstream
+# source and their expectations are recorded here.
+# The symlink targets live one level down (compiler/2025.3), so the parent
+# directory has to exist before the link can be created.
+- name: Create the oneAPI shim parent directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ arc_b70_oneapi_shim }}/compiler"
+    - "{{ arc_b70_oneapi_shim }}/umf"
+
+- name: Create the oneAPI layout shim for the vendored build scripts
+  ansible.builtin.file:
+    src: "{{ item.src }}"
+    dest: "{{ arc_b70_oneapi_shim }}/{{ item.dest }}"
+    state: link
+    force: true
+  loop:
+    - { dest: "compiler/2025.3", src: "/opt/intel/oneapi/compiler/latest" }
+    - { dest: "umf/1.0", src: "/opt/intel/oneapi/umf/latest" }
+  loop_control:
+    label: "{{ item.dest }}"
+
+# OneMKL is a separate Arch package; the scripts need it at $MKLROOT with
+# lib/cmake/mkl under it.
+- name: Ensure oneMKL is present
+  ansible.builtin.pacman:
+    name:
+      - intel-oneapi-mkl
+      - intel-oneapi-mkl-sycl
+    state: present
+
+# engines/onednn/build.sh clones oneDNN and COMMITS a local patch to it, as
+# whatever user runs the build. Built as root, git has no identity and the
+# commit fails with "empty ident name ... not allowed". The identity is
+# local to the machine and never leaves it.
+- name: Ensure git has a commit identity for the build
+  ansible.builtin.command:
+    cmd: "git config --global user.email 'arc-b70@localhost'"
+  register: arc_b70_h3_git_email
+  changed_when: false
+
+- name: Ensure git has a committer name for the build
+  ansible.builtin.command:
+    cmd: "git config --global user.name 'arc-b70'"
+  register: arc_b70_h3_git_name
+  changed_when: false
+
+# Exactly two submodules: sd.cpp (the SYCL port) and onednn (the local patch
+# every SYCL binary links). audio.cpp is the Drama-3 port and is excluded.
+- name: Initialise the sd.cpp and onednn submodules
+  ansible.builtin.command:
+    cmd: git submodule update --init --recursive engines/sd.cpp engines/onednn
+    chdir: "{{ arc_b70_b70_ref_dir }}"
+  changed_when: false
+
+- name: Build the H3 engine (spike)
+  block:
+    # engines/onednn/build.sh installs into ~/opt/onednn-sycl-graph, and the
+    # sd.cpp binaries link that path. Running with HOME=/ maps it to
+    # /opt/onednn-sycl-graph, which is where the creates: guard looks.
+    - name: Create the oneDNN install prefix
+      ansible.builtin.file:
+        path: /opt/onednn-sycl-graph
+        state: directory
+        mode: '0755'
+
+    - name: Build the local oneDNN (SYCL graph)
+      ansible.builtin.command:
+        cmd: bash build.sh
+        chdir: "{{ arc_b70_b70_ref_dir }}/engines/onednn"
+        creates: /opt/onednn-sycl-graph/lib/libdnnl_h3.so
+      environment:
+        HOME: /
+        ONEAPI: "{{ arc_b70_oneapi_shim }}"
+        MKLROOT: /opt/intel/oneapi/mkl/latest
+        # CMake 4.x refuses to install the dnnl target with the Ninja
+        # generator unless the build tree's RPATH is already the install
+        # RPATH ("The install of the dnnl target requires changing an RPATH
+        # from the build tree"). CMake names the variable itself:
+        # CMAKE_BUILD_WITH_INSTALL_RPATH. The reference was built with
+        # CMake 3.x, where this was allowed.
+        #
+        # build.sh passes no -D for it and takes no extra arguments, but
+        # CMake seeds its cache from the ENVIRONMENT, so exporting the
+        # variable is enough -- no change to the vendored script.
+        CMAKE_BUILD_WITH_INSTALL_RPATH: "ON"
+
+    # libwebm (vendored inside sd.cpp) demands C++11 support:
+    #
+    #   require_cxx_flag_nomsvc("-std=c++11")
+    #
+    # and its CMake check compiles AND LINKS a test program. The link uses
+    # CMAKE_EXE_LINKER_FLAGS, which for the SYCL build carry -fsycl, and
+    # icpx refuses the combination:
+    #
+    #   icpx: error: SYCL requires C++17 or later; '-std=c++11' is not supported
+    #
+    # So the check fails and the configure aborts with "LIBWEBM requires
+    # support for CXX flag: -std=c++11".
+    #
+    # C++17 is the correct standard here, not a workaround: SYCL requires
+    # C++17 or later anyway, so the SYCL sources are compiled as C++17
+    # regardless. libwebm's own sources are C++11-era but compile cleanly
+    # as C++17 (verified: the whole library and its sample programs
+    # build).
+    #
+    # The vendored file is edited in place with lineinfile rather than
+    # patched, so the change is idempotent and re-running the role is a
+    # no-op.
+    - name: Move libwebm from C++11 to C++17
+      ansible.builtin.lineinfile:
+        path: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp/thirdparty/libwebm/CMakeLists.txt"
+        regexp: 'require_cxx_flag_nomsvc\("-std=c\+\+11"\)'
+        line: 'require_cxx_flag_nomsvc("-std=c++17")'
+        state: present
+
+    - name: Build sd-cli with SYCL
+      ansible.builtin.command:
+        cmd: bash build_sycl.sh
+        chdir: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp"
+        creates: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp/build-sycl/bin/sd-cli"
+      environment:
+        HOME: /
+        ONEAPI: "{{ arc_b70_oneapi_shim }}"
+        MKLROOT: /opt/intel/oneapi/mkl/latest
+        ONEDNN: /opt/onednn-sycl-graph
+        ZE_INC: /opt/onednn-src-h3/third_party/level_zero
+
+    - name: Build the native XPU libraries
+      ansible.builtin.command:
+        cmd: bash xpu_sdpa/build_native.sh
+        chdir: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp"
+        creates: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp/xpu_sdpa/libxpu_h3.so"
+      environment:
+        HOME: /
+        ONEAPI: "{{ arc_b70_oneapi_shim }}"
+        MKLROOT: /opt/intel/oneapi/mkl/latest
+        ONEDNN: /opt/onednn-sycl-graph
+
+    # The self-test compares the NATIVE libraries against a libtorch
+    # REFERENCE build of the same sources. The reference libraries are
+    # validation artifacts only -- they are never used for rendering -- but
+    # without them there is nothing to compare against, so the self-test
+    # cannot run at all.
+    #
+    # The build needs a venv with torch+xpu. The ComfyUI venv has it.
+    #
+    # build_torchref.sh hard-codes "-ldnnl" while its sibling build_native.sh
+    # takes a DNNL_LIB knob defaulting to "dnnl_h3". This host's oneDNN is
+    # installed as libdnnl_h3.so (the local SDPA-patched build) with no
+    # libdnnl.so alongside it, so the hard-coded name fails to link:
+    #
+    #   /usr/bin/ld: cannot find -ldnnl
+    #
+    # The fix makes the two scripts consistent rather than adding a
+    # libdnnl.so symlink to the shared oneDNN install: a symlink there would
+    # be a global side effect on a directory the production builds also use,
+    # and it would silently satisfy any future "-ldnnl" with the patched
+    # build. Both edits are lineinfile, so the change is idempotent.
+    # Two tasks, one line each. The original inserted a two-line block whose
+    # regexp matched only the first line: lineinfile then compared that single
+    # line against the two-line value on every run, found them different and
+    # replaced it -- changed=1 forever, with the content never actually drifting.
+    - name: Ensure build_torchref.sh has the ONEDNN knob
+      ansible.builtin.lineinfile:
+        path: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp/xpu_sdpa/torchref/build_torchref.sh"
+        regexp: '^ONEDNN='
+        line: 'ONEDNN=${ONEDNN:-$HOME/opt/onednn-sycl}'
+        state: present
+
+    - name: Give build_torchref.sh the DNNL_LIB knob build_native.sh already has
+      ansible.builtin.lineinfile:
+        path: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp/xpu_sdpa/torchref/build_torchref.sh"
+        regexp: '^DNNL_LIB='
+        line: 'DNNL_LIB=${DNNL_LIB:-dnnl_h3}'
+        state: present
+
+    - name: Link build_torchref.sh against the SDPA-patched oneDNN name
+      ansible.builtin.lineinfile:
+        path: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp/xpu_sdpa/torchref/build_torchref.sh"
+        regexp: '(-L"\$ONEDNN/lib") -ldnnl'
+        line: '\1 -l"$DNNL_LIB"'
+        backrefs: true
+        state: present
+
+    - name: Build the libtorch reference libraries for the self-test
+      ansible.builtin.command:
+        cmd: bash xpu_sdpa/torchref/build_torchref.sh h3
+        chdir: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp"
+        creates: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp/xpu_sdpa/torchref/libxpu_h3_torchref.so"
+      environment:
+        HOME: /
+        ONEAPI: "{{ arc_b70_oneapi_shim }}"
+        MKLROOT: /opt/intel/oneapi/mkl/latest
+        ONEDNN: /opt/onednn-sycl-graph
+        ZE_INC: /opt/onednn-src-h3/third_party/level_zero
+        TORCH_VENV: "{{ arc_b70_h3_torch_venv }}"
+
+    # selftest.sh runs three processes: gen (CPU only, writes deterministic
+    # random inputs), ref (the libtorch build, writes ref_out.f32) and
+    # check (the native build, compares against the reference).
+    #
+    # It must be invoked with the MODEL and the weights -- calling
+    # xpu_selftest directly prints a usage message and exits 2, which the
+    # role read as a failed self-test.
+    #
+    # It runs ON THE GPU, so it must not overlap anything else using the
+    # card. The B70 is idle at this point in the plan (the GPU services are
+    # started and stopped by their own roles), and the whole play is
+    # wrapped in block/rescue -- a self-test that cannot get the card is
+    # reported as BLOCKED rather than failing the run.
+    #
+    # KNOWN LIMITATION -- the reference build cannot run on this host:
+    #
+    #   SIGSEGV in __sycl_register_lib, frame chain
+    #     libsycl.so.9 (system oneAPI 2026.2)
+    #       <- sycl.descriptor_reg in libmkl_sycl_blas.so.5 (ComfyUI venv)
+    #
+    # Two SYCL runtimes end up in one process. The PyPI torch stack
+    # (intel-sycl-rt 2025.3.2) ships libsycl.so.8, and this host's oneAPI
+    # is 2026.2 / libsycl.so.9 -- the "2025.3" oneAPI shim is a symlink to
+    # 2026.2, so there is exactly one compiler and it emits SYCL 9. The
+    # reference library therefore NEEDs libsycl.so.9, while the
+    # torch-bundled mkl_sycl_blas is built for SYCL 8 and crashes when it
+    # registers its descriptor with the 9.0 loader.
+    #
+    # torch avoids this because it loads with its own library path; a
+    # standalone binary that dlopen()s a torch-linked .so cannot. The
+    # venv ships SYCL 8 *libraries* but no headers, so the reference build
+    # cannot be compiled against them either.
+    #
+    # The ENGINE is unaffected: build_native.sh's libraries and sd-cli are
+    # fully torch-free (verified: 0 torch/c10 NEEDED entries) and
+    # self-consistent on SYCL 9 -- sd-cli returns its version and help.
+    # Only this libtorch-vs-native comparison cannot run.
+    - name: Run the XPU self-test
+      ansible.builtin.command:
+        cmd: bash xpu_sdpa/selftest.sh h3
+        chdir: "{{ arc_b70_b70_ref_dir }}/engines/sd.cpp"
+      environment:
+        HOME: /
+        ONEAPI: "{{ arc_b70_oneapi_shim }}"
+        MKLROOT: /opt/intel/oneapi/mkl/latest
+        ONEDNN: /opt/onednn-sycl-graph
+        SD_XPU_H3_WEIGHTS: "{{ arc_b70_h3_weights }}"
+      register: arc_b70_xpu_selftest
+      changed_when: false
+
+    - name: Report the H3 engine as READY
+      ansible.builtin.debug:
+        msg: "H3 engine: READY — {{ arc_b70_xpu_selftest.stdout_lines | default([]) }}"
+
+  rescue:
+    - name: Report the H3 engine as BLOCKED
+      ansible.builtin.debug:
+        msg: >-
+          H3 engine: BLOCKED — {{ ansible_failed_task.name | default('unknown task') }}
+          failed: {{ ansible_failed_result.msg | default('no message') | truncate(400) }}.
+          If the failing task was "Run the XPU self-test", this is the known SYCL-8
+          (PyPI torch wheels) vs SYCL-9 (system oneAPI 2026.2) conflict documented
+          above: the ENGINE built and sd-cli runs, only the libtorch-vs-native
+          comparison cannot. ComfyUI-on-XPU (the comfyui role) remains the plan's
+          H3 path.
