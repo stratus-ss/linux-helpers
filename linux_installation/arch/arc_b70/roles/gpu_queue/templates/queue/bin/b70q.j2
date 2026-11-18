@@ -1,0 +1,11 @@
+#!/bin/sh
+# The b70q CLI: submit jobs, watch the queue, serve the dashboard.
+B={{ arc_b70_bun_bin }}
+if [ ! -x "$B" ]; then
+  B=$(command -v bun 2>/dev/null)
+fi
+if [ -z "$B" ]; then
+  echo "b70q: bun not found (expected at {{ arc_b70_bun_bin }})" >&2
+  exit 127
+fi
+exec "$B" "{{ arc_b70_b70_ref_dir }}/queue/src/cli.ts" "$@"

@@ -1,0 +1,143 @@
+---
+# gpu_queue -- the reference's single-GPU admission queue, vendored verbatim.
+#
+# The daemon runs as a USER unit for the arc_b70 user, like the reference's
+# own. It spawns each job with "systemd-run --user", which needs the user's
+# session bus; a system unit running as root has none and every job fails
+# with "Failed to connect to user scope bus".
+
+- name: Install bun
+  ansible.builtin.shell:
+    cmd: curl -fsSL https://bun.sh/install | bash
+    creates: "{{ arc_b70_bun_bin }}"
+  environment:
+    HOME: /root
+    BUN_INSTALL: /usr/local
+
+- name: Persist bun on PATH
+  ansible.builtin.copy:
+    dest: /etc/profile.d/bun.sh
+    content: "export PATH={{ arc_b70_bun_bin | dirname }}:$PATH\n"
+    mode: '0644'
+
+- name: Install queue dependencies
+  ansible.builtin.command:
+    cmd: "{{ arc_b70_bun_bin }} install"
+    chdir: "{{ arc_b70_b70_ref_dir }}/queue"
+    creates: "{{ arc_b70_b70_ref_dir }}/queue/node_modules"
+
+# The vendored launchers hard-code "$HOME/b70/queue/src", the reference's own
+# home-directory layout. On this host the queue lives at
+# {{ arc_b70_b70_ref_dir }}/queue, so the scripts are templated to point there
+# and to find bun in the role's install prefix. The vendored files themselves
+# stay untouched.
+- name: Deploy the queue binaries
+  ansible.builtin.template:
+    src: "queue/bin/{{ item }}.j2"
+    dest: "/usr/local/bin/{{ item }}"
+    mode: '0755'
+  loop:
+    - b70q
+    - b70-lease
+
+- name: Ensure the queue user exists
+  ansible.builtin.user:
+    name: "{{ arc_b70_queue_user }}"
+    groups: render
+    append: true
+    create_home: true
+    shell: /bin/bash
+
+# The queue user needs a runtime dir for its socket and its job units. A
+# user unit cannot start without one.
+- name: Ensure the queue user's systemd manager is running
+  ansible.builtin.command:
+    cmd: "loginctl enable-linger {{ arc_b70_queue_user }}"
+  changed_when: false
+
+- name: Create the queue user's systemd unit directory
+  ansible.builtin.file:
+    path: "/home/{{ arc_b70_queue_user }}/.config/systemd/user"
+    state: directory
+    owner: "{{ arc_b70_queue_user }}"
+    group: "{{ arc_b70_queue_user }}"
+    mode: '0755'
+
+- name: Deploy the queue daemon unit
+  ansible.builtin.template:
+    src: b70q.service.j2
+    dest: "/home/{{ arc_b70_queue_user }}/.config/systemd/user/b70q.service"
+    owner: "{{ arc_b70_queue_user }}"
+    group: "{{ arc_b70_queue_user }}"
+    mode: '0644'
+
+# systemctl --user, not ansible.builtin.systemd_service: that module talks to
+# the SYSTEM manager, and a system unit cannot hold a user unit. Reloading
+# the user's manager and starting the user unit has to go through the user
+# bus, which needs XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS.
+- name: Enable and start the queue daemon
+  ansible.builtin.shell: |
+    set -euo pipefail
+    systemctl --user daemon-reload
+    systemctl --user enable --now b70q.service
+  args:
+    executable: /bin/bash
+  become: true
+  become_user: "{{ arc_b70_queue_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ arc_b70_queue_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ arc_b70_queue_uid }}/bus"
+    HOME: "/home/{{ arc_b70_queue_user }}"
+  register: arc_b70_queue_start
+  changed_when: "'Created' in arc_b70_queue_start.stdout or 'started' in arc_b70_queue_start.stdout"
+
+# The dashboard answering only proves the HTTP server is up. A job actually
+# running through the queue proves the daemon, the CLI, the sqlite state and
+# the runner all work.
+#
+# "b70q wait" blocks until the job is over, so it is wrapped in a shell-level
+# timeout: an unbounded wait would hang the play forever if the card is
+# never granted (which is exactly what happens while a GPU service outside
+# the queue holds VRAM).
+- name: Submit a job through the queue
+  ansible.builtin.shell: |
+    set -uo pipefail
+    export XDG_RUNTIME_DIR="/run/user/{{ arc_b70_queue_uid }}"
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/{{ arc_b70_queue_uid }}/bus"
+    out=$(b70q submit acceptance --note 'arc_b70 acceptance' -- echo arc_b70_queue_ok 2>&1)
+    echo "$out"
+    id=$(echo "$out" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+    [ -n "$id" ] || { echo "could not parse a job id from: $out"; exit 1; }
+    timeout 300 b70q wait "$id" || echo "wait returned $?"
+    b70q log "$id" > /tmp/arc_b70_queue_log 2>&1 || true
+  args:
+    executable: /bin/bash
+  become: true
+  become_user: "{{ arc_b70_queue_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ arc_b70_queue_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ arc_b70_queue_uid }}/bus"
+    HOME: "/home/{{ arc_b70_queue_user }}"
+  register: arc_b70_queue_run
+  changed_when: false
+  failed_when: false
+
+- name: Read the queued job's log
+  ansible.builtin.slurp:
+    src: /tmp/arc_b70_queue_log
+  register: arc_b70_queue_log
+  changed_when: false
+
+- name: Assert the queued job ran
+  ansible.builtin.assert:
+    that:
+      - "'arc_b70_queue_ok' in (arc_b70_queue_log.content | b64decode)"
+    fail_msg: >-
+      The job submitted through b70q did not produce its expected output.
+      It is likely still waiting for the card: the queue refuses to grant it
+      while any process holds VRAM outside the queue (a running GPU service
+      does). Submit output:
+      {{ arc_b70_queue_run.stdout }}
+      Job log:
+      {{ arc_b70_queue_log.content | b64decode }}
+    quiet: true

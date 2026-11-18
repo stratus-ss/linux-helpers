@@ -1,0 +1,19 @@
+[Unit]
+Description=b70q: the queue for the Intel Arc Pro B70 (dashboard http://127.0.0.1:7870/)
+After=default.target
+
+[Service]
+# A USER unit, like the reference's. The queue spawns each job with
+# "systemd-run --user", which needs the user's session bus; a system unit
+# running as root has none, and every job fails with "Failed to connect to
+# user scope bus". stratus is in the render group and the render node is
+# world-writable, so the queue does not need root.
+ExecStart={{ arc_b70_bun_bin }} {{ arc_b70_b70_ref_dir }}/queue/src/daemon.ts
+WorkingDirectory={{ arc_b70_b70_ref_dir }}/queue
+Restart=always
+RestartSec=2
+# Submitted jobs run in their own units (b70q-<id>.service), so restarting
+# the daemon never touches them.
+
+[Install]
+WantedBy=default.target

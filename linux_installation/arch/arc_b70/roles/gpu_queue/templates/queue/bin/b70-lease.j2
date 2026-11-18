@@ -1,0 +1,11 @@
+#!/bin/sh
+# Shared lease on the Intel Arc Pro B70, through the b70q queue daemon. Falls
+# back to the old flock script when bun is not available.
+B={{ arc_b70_bun_bin }}
+if [ ! -x "$B" ]; then
+  B=$(command -v bun 2>/dev/null)
+fi
+if [ -z "$B" ]; then
+  exec "{{ arc_b70_b70_ref_dir }}/queue/legacy/b70-lease" "$@"
+fi
+exec "$B" "{{ arc_b70_b70_ref_dir }}/queue/src/lease.ts" "$@"
