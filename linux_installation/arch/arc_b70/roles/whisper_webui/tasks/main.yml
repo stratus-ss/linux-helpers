@@ -1,0 +1,278 @@
+---
+# whisper_webui -- the Whisper transcription UI on the CPU path (DR-8).
+#
+# CTranslate2 has no XPU backend, so there is no GPU work here; the nvidia
+# runtime and the two-backend split from containers-gpu are not ported.
+#
+# The image is BUILT from the operator's own fork (stratus-ss/
+# Whisper-WebUI-Swear-Removal), which is checked out on the NAS. The
+# published image for that fork (quay.io/sovens/transcription/whisper-webui)
+# is no longer anonymously pullable -- quay.io answers 401 UNAUTHORIZED --
+# and the upstream jhj0517 image lacks the fork's swear-removal feature.
+# Building from the fork's own source keeps the feature and removes the
+# registry dependency.
+#
+# The fork's requirements.txt pins the CUDA 12.8 extra-index. This host has
+# no NVIDIA GPU and Whisper runs on the CPU (DR-8), so the build installs
+# CPU-only torch instead. The CUDA wheels are ~3 GB of dead weight.
+
+- name: Check the Whisper application tree on the NAS
+  ansible.builtin.stat:
+    path: "{{ arc_b70_aistuff_mount }}/Whisper-WebUI"
+  register: arc_b70_whisper_tree
+  changed_when: false
+
+- name: Assert the Whisper application tree is present
+  ansible.builtin.assert:
+    that:
+      - arc_b70_whisper_tree.stat.exists
+    fail_msg: >-
+      {{ arc_b70_aistuff_mount }}/Whisper-WebUI is missing. Task 4 must have
+      mounted the /AIStuff export before this role runs.
+    quiet: true
+
+- name: Ensure the Whisper directory is present
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ arc_b70_whisper_dir }}"
+    - "{{ arc_b70_whisper_build_context }}"
+
+# The build context lives on the NFS export. docker build reads every file in
+# the context, and 411 MB of many small files over NFS is slow enough to
+# dominate the build. Copy it to the local disk once and build there.
+#
+# Both the source and the destination are on the target, so the copy runs
+# there. ansible.posix.synchronize would run rsync on the controller, which
+# has no /AIStuff mount.
+- name: Copy the Whisper source to the local disk for the build
+  ansible.builtin.shell: |
+    set -euo pipefail
+    mkdir -p "{{ arc_b70_whisper_build_context }}"
+    rsync -a \
+      --itemize-changes \
+      --checksum \
+      --no-times \
+      --exclude=.git \
+      --exclude=models \
+      --exclude=outputs \
+      --exclude=venv \
+      --exclude=__pycache__ \
+      "{{ arc_b70_aistuff_mount }}/Whisper-WebUI/" \
+      "{{ arc_b70_whisper_build_context }}/"
+  args:
+    executable: /bin/bash
+  register: arc_b70_whisper_sync
+  # --checksum AND --no-times, for two different reasons.
+  #
+  # --itemize-changes alone compares size+time, and one source file carried a
+  # differing mtime: every pass printed '.f..t...... configs/default_parameters.yaml'.
+  # --checksum fixes the transfer decision but NOT this: with -a, rsync still
+  # re-applies times, so a mtime-only difference keeps reporting as changed.
+  #
+  # --no-times is what actually stops it. The drift is real and not caused by
+  # this task: the Whisper app rewrites configs/default_parameters.yaml in the
+  # build tree at runtime, so every play restores the source copy and the next
+  # play would restore it again, forever. Measured after a full play: the
+  # destination mtime differed from the source's; forcing a wrong mtime and
+  # re-running with --no-times produced no output at all.
+  changed_when: arc_b70_whisper_sync.stdout | length > 0
+
+- name: Deploy the CPU Dockerfile
+  ansible.builtin.copy:
+    src: Dockerfile.cpu.j2
+    dest: "{{ arc_b70_whisper_build_context }}/Dockerfile.arc_b70"
+    mode: '0644'
+  register: arc_b70_whisper_dockerfile
+
+- name: Deploy the CPU torch constraints
+  ansible.builtin.copy:
+    src: constraints-cpu.txt.j2
+    dest: "{{ arc_b70_whisper_build_context }}/constraints-cpu.txt"
+    mode: '0644'
+
+# The build always reports "Successfully built", so the guard is the image's
+# presence AND its build recipe. A changed Dockerfile must rebuild: an
+# image whose torch is CUDA instead of CPU is worse than no image, because
+# the container starts and silently does the wrong thing.
+#
+# The recipe is identified by the checksum of the two files that determine
+# it. The checksum is written into the image as a label, so "is the image
+# current?" is one label lookup rather than a digest comparison against a
+# file that may not exist yet.
+- name: Compute the build recipe checksum
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    checksum_algorithm: sha256
+  register: arc_b70_whisper_recipe_files
+  loop:
+    - "{{ arc_b70_whisper_build_context }}/Dockerfile.arc_b70"
+    - "{{ arc_b70_whisper_build_context }}/constraints-cpu.txt"
+
+- name: Record the build recipe checksum
+  ansible.builtin.set_fact:
+    arc_b70_whisper_recipe: "{{ arc_b70_whisper_recipe_files.results | map(attribute='stat.checksum') | join('') }}"
+
+- name: Read the build recipe label from the current image
+  ansible.builtin.command:
+    cmd: >-
+      docker image inspect --format
+      '{{ '{{' }} index .Config.Labels "org.arcb70.recipe" {{ '}}' }}'
+      {{ arc_b70_whisper_image }}
+  register: arc_b70_whisper_image_recipe
+  changed_when: false
+  failed_when: false
+
+- name: Build the Whisper image
+  ansible.builtin.command:
+    cmd: >-
+      docker build
+      --label org.arcb70.recipe={{ arc_b70_whisper_recipe }}
+      -f Dockerfile.arc_b70
+      -t {{ arc_b70_whisper_image }} .
+    chdir: "{{ arc_b70_whisper_build_context }}"
+  when: >-
+    arc_b70_whisper_image_recipe.rc != 0
+    or arc_b70_whisper_image_recipe.stdout | trim != arc_b70_whisper_recipe
+  changed_when: true
+
+# The image must be the CPU build, not a CUDA one that happens to run. A
+# CUDA torch image is ~9 GB and drags in nvidia-* wheels that do nothing
+# here.
+#
+# torchvision is checked too, and separately from torch: torchvision is not
+# in the fork's requirements.txt at all -- it arrives as a dependency of
+# torchmetrics -- and PyPI's default torchvision is the CUDA build, which
+# imports as a circular-import AttributeError against a CPU torch. The
+# container then starts and dies on every request, which looks like an app
+# problem rather than a packaging one.
+- name: Assert the image carries CPU torch
+  ansible.builtin.command:
+    cmd: >-
+      docker run --rm --entrypoint python3 {{ arc_b70_whisper_image }} -c
+      "import torch, torchvision; print(torch.__version__); print(torchvision.__version__)"
+  register: arc_b70_whisper_torch
+  changed_when: false
+  failed_when: "'+cu' in arc_b70_whisper_torch.stdout"
+
+- name: Deploy the Whisper compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ arc_b70_whisper_dir }}/compose.yaml"
+    mode: '0600'
+
+# The idempotency signal is the container's state, not the command's output.
+- name: Check the Whisper container's state
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' {{ arc_b70_whisper_image_name }}"
+  register: arc_b70_whisper_state
+  changed_when: false
+  failed_when: false
+
+# The container MUST be recreated when the image was rebuilt. The image tag
+# does not change when the image is rebuilt under it, so "docker compose up
+# -d" sees the same image reference and leaves the old container running --
+# with the OLD image. That is how a rebuilt CPU image kept serving the
+# previous CUDA build: the container was healthy and the app crashed on every
+# request, and nothing in the compose state showed a mismatch.
+- name: Read the image id the running container was created from
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.Image{{ '}}' }}' {{ arc_b70_whisper_image_name }}"
+  register: arc_b70_whisper_running_image
+  changed_when: false
+  failed_when: false
+
+- name: Read the image id of the current image
+  ansible.builtin.command:
+    cmd: "docker image inspect -f '{{ '{{' }}.Id{{ '}}' }}' {{ arc_b70_whisper_image }}"
+  register: arc_b70_whisper_current_image
+  changed_when: false
+  failed_when: false
+
+- name: Start the Whisper container
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_whisper_dir }}/compose.yaml up -d --force-recreate"
+    chdir: "{{ arc_b70_whisper_dir }}"
+  register: arc_b70_whisper_up
+  when: >-
+    arc_b70_whisper_state.rc != 0
+    or 'running' not in arc_b70_whisper_state.stdout
+    or arc_b70_whisper_running_image.stdout | trim != arc_b70_whisper_current_image.stdout | trim
+  changed_when: true
+
+- name: Wait for Whisper to answer
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_whisper_port }}/"
+  register: arc_b70_whisper_root
+  until: arc_b70_whisper_root.status == 200
+  retries: 60
+  delay: 5
+
+# One drop-in serves all three containerised workloads (Whisper, Frigate,
+# ebook2audiobook): all three bind-mount NFS-backed trees under /AIStuff.
+# The drop-in directory is not shipped by the docker package; copy: fails when
+# the destination's parent does not exist.
+- name: Create the docker drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    mode: '0755'
+
+- name: Write the Docker NFS-mounts drop-in
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/docker.service.d/arc-b70-nfs.conf
+    content: |
+      [Unit]
+      RequiresMountsFor={{ arc_b70_aistuff_mount }}/Whisper-WebUI/models
+      RequiresMountsFor={{ arc_b70_aistuff_mount }}/frigate
+      RequiresMountsFor={{ arc_b70_aistuff_mount }}/ebook2audiobook/audio
+    mode: '0644'
+
+# daemon_reload makes systemd re-read the unit without touching the running
+# service. state: reloaded is not usable here -- it always reports changed.
+# The one-time `systemctl restart docker` is an operator action.
+- name: Reload systemd for the Docker drop-in
+  ansible.builtin.systemd_service:
+    name: docker
+    daemon_reload: true
+    state: started
+
+# Acceptance: a REAL transcription through the container's own API.
+#
+# The app is a GRADIO app, so the transcription endpoint is the named Gradio
+# endpoint /transcribe_file, reached through Gradio's own API:
+#
+#   POST /gradio_api/upload               -> a file handle for the audio
+#   POST /gradio_api/call/transcribe_file -> the call, returns an event id
+#   GET  /gradio_api/call/transcribe_file/<event_id> -> the SSE result
+#
+# The endpoint's 56 parameters and their defaults are read from the running
+# server's own /gradio_api/info, never guessed, so the probe exercises the
+# shipped configuration. Two of the published defaults are wrong for this
+# host and are corrected: the compute type is float16 (not accepted by the
+# runtime, and not usable on a CPU-only build), and the model is large-v2
+# (minutes per clip on the CPU, and not the model the NAS has).
+#
+# The probe audio is a 75-minute recording on the NAS, so the probe cuts a
+# 30-second excerpt with ffmpeg first -- the acceptance has to prove the
+# pipeline transcribes, not to transcribe an hour of audio.
+#
+# This is a probe, not a state change, so changed_when: false.
+- name: Deploy the transcription probe
+  ansible.builtin.copy:
+    src: probe_transcribe.py
+    dest: "{{ arc_b70_whisper_dir }}/probe_transcribe.py"
+    mode: '0755'
+
+- name: Verify transcription works
+  ansible.builtin.command:
+    cmd: "python3 {{ arc_b70_whisper_dir }}/probe_transcribe.py {{ arc_b70_whisper_probe_audio }}"
+  register: arc_b70_whisper_probe
+  changed_when: false
+  failed_when: arc_b70_whisper_probe.rc != 0
+
+- name: Record the transcription result
+  ansible.builtin.debug:
+    msg: "{{ arc_b70_whisper_probe.stdout_lines | default([]) | join(' | ') }}"

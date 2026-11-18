@@ -1,0 +1,23 @@
+# CPU-only torch for the Whisper-WebUI build.
+#
+# The fork's requirements.txt carries:
+#     --extra-index-url https://download.pytorch.org/whl/cu128
+#     torch>=2.8.0,<2.9.0
+#     torchaudio>=2.8.0,<2.9.0
+#
+# The Dockerfile removes the extra index and installs torch/torchaudio/
+# torchvision explicitly from https://download.pytorch.org/whl/cpu BEFORE
+# running requirements.txt. This file pins the versions so the later
+# requirements install cannot pull a different torch back in.
+#
+# torchvision is not in requirements.txt at all -- it arrives as a
+# dependency of torchmetrics (via pytorch-lightning, via pyannote.audio),
+# and PyPI's default build is CUDA. 0.23.0 is the version that matches
+# torch 2.8.0.
+#
+# The version floor matches the fork's own pin. The upper bound is dropped:
+# the fork's "<2.9.0" exists to harmonise torch with torchaudio, and both
+# are pinned together here, so the pair stays consistent either way.
+torch==2.8.0
+torchaudio==2.8.0
+torchvision==0.23.0

@@ -1,0 +1,27 @@
+# The fork's own compose (stratus-ss/Whisper-WebUI-Swear-Removal), with the
+# NVIDIA runtime removed -- this host has no NVIDIA GPU and Whisper runs on
+# the CPU (DR-8). "runtime: nvidia" on a host without the NVIDIA container
+# runtime makes docker fail to start the container.
+services:
+  whisper-webui:
+    container_name: {{ arc_b70_whisper_image_name }}
+    image: {{ arc_b70_whisper_image }}
+    volumes:
+      # Models will be stored in the './models' directory on the host.
+      # Similarly, all output files will be stored in the './outputs' directory.
+      - {{ arc_b70_whisper_models }}:/Whisper-WebUI-Swear-Removal/models
+      - {{ arc_b70_whisper_outputs }}:/Whisper-WebUI-Swear-Removal/outputs
+      - {{ arc_b70_whisper_configs }}:/Whisper-WebUI-Swear-Removal/configs
+    ports:
+      - "127.0.0.1:{{ arc_b70_whisper_port }}:7860"
+    stdin_open: true
+    tty: true
+    # The server binds 0.0.0.0 inside the container's own network namespace;
+    # the host-published address is loopback-only (DR-7).
+    entrypoint: ["python", "app.py", "--server_port", "7860", "--server_name", "0.0.0.0"]
+    environment:
+      # Speaker diarization needs a Hugging Face token; without it the
+      # diarization models are not downloadable. The token comes from the
+      # controller's environment and never enters this repo.
+      - HF_TOKEN={{ arc_b70_hf_token }}
+    restart: unless-stopped

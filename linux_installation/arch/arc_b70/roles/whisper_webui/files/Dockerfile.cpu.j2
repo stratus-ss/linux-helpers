@@ -1,0 +1,119 @@
+# The operator's fork of Whisper-WebUI, built for CPU inference on the
+# Intel Arc Pro B70 host.
+#
+# This is the fork's own Dockerfile (stratus-ss/Whisper-WebUI-Swear-Removal)
+# with ONE change: the CUDA extra-index and the CUDA torch pins are replaced
+# by CPU-only torch.
+#
+# Why: the fork's requirements.txt points at
+# --extra-index-url https://download.pytorch.org/whl/cu128 and pins
+# torch>=2.8.0,<2.9.0, which resolves to a CUDA build. CTranslate2 -- the
+# engine that actually runs the transcription -- has no XPU backend, so
+# Whisper runs on the CPU here (DR-8) and the CUDA wheels are ~3 GB of
+# dead weight that also pulls in nvidia-* libraries this host cannot use.
+#
+# The pip constraint file replaces the torch/torchaudio lines so the CPU
+# wheels are chosen, and the extra-index is removed so PyPI's CPU build is
+# used. Everything else -- the swear-removal dependencies (monkeyplug,
+# mmguero), the UVR install, the appuser setup -- is unchanged from the fork.
+
+FROM python:3.11-slim AS builder
+
+RUN apt-get update && \
+    apt-get install -y curl git build-essential ffmpeg && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
+    mkdir -p /Whisper-WebUI-Swear-Removal
+
+WORKDIR /Whisper-WebUI-Swear-Removal
+
+COPY requirements.txt .
+COPY constraints-cpu.txt .
+
+# Two things are needed for a CPU torch, and neither is a version constraint:
+#
+# 1. The CUDA extra index must go. The fork's requirements.txt carries
+#    --extra-index-url https://download.pytorch.org/whl/cu128, and pip would
+#    FIND the cu128 wheel there and prefer it. A constraint cannot stop
+#    that -- the wheel is still a candidate -- so the index line is removed.
+#
+# 2. PyPI's default torch wheel for Linux IS the CUDA build. With the extra
+#    index gone, pip falls back to PyPI, and PyPI's torch 2.8.0 for
+#    manylinux is 2.8.0+cu128 -- the same CUDA wheel, by a different route.
+#    The CPU build lives only on the explicit CPU index, so torch is
+#    installed from https://download.pytorch.org/whl/cpu directly.
+#
+# The order matters: torch/torchaudio/torchvision are installed FIRST, from
+# the CPU index, and the rest of requirements.txt is installed afterwards.
+# A later plain `pip install -r requirements.txt` would see torch already
+# satisfied and leave it alone, so the CPU wheels survive.
+#
+# torchvision has to be pinned explicitly for the same reason as torch, and
+# it is not in the fork's requirements.txt at all -- it arrives as a
+# dependency of torchmetrics (via pytorch-lightning, via pyannote.audio).
+# PyPI's default torchvision 0.23.0 is the CUDA build, and a CUDA
+# torchvision against a CPU torch dies at import:
+#
+#   AttributeError: partially initialized module 'torchvision' has no
+#   attribute 'extension' (most likely due to a circular import)
+#
+# which is torchvision's C extension refusing to load. The CPU build
+# (0.23.0+cpu) matches torch 2.8.0 and loads.
+RUN sed -i '/--extra-index-url/d' requirements.txt
+
+RUN python -m venv venv && \
+    . venv/bin/activate && \
+    pip install --upgrade pip && \
+    pip install "setuptools<58" wheel cython && \
+    export PIP_NO_BUILD_ISOLATION=false && \
+    pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 && \
+    pip install -c constraints-cpu.txt -r requirements.txt && \
+    git clone --depth 1 https://github.com/jhj0517/ultimatevocalremover_api.git /tmp/uvr && \
+    cp -r /tmp/uvr/src venv/lib/python3.11/site-packages/uvr && \
+    pip install openunmix dora-search einops julius lameenc museval treetable onnx onnx2pytorch ml_collections hydra-core hydra-colorlog audioread librosa audiofile && \
+    rm -rf /tmp/uvr && \
+    # The CPU wheels are installed FIRST, from the CPU index, so the later
+    # requirements install would leave them alone -- EXCEPT that it runs with
+    # -U, and torchmetrics declares torchvision with no version, so pip
+    # upgrades it from PyPI, where the default build is CUDA. The end state
+    # is what matters, so the CPU wheels are reinstalled LAST, from the CPU
+    # index, and the versions are asserted.
+    pip install --no-cache-dir --force-reinstall --no-deps --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 && \
+    python -c "import torch, torchvision, torchaudio; assert '+cu' not in torch.__version__, torch.__version__; assert '+cu' not in torchvision.__version__, torchvision.__version__; assert '+cu' not in torchaudio.__version__, torchaudio.__version__; print('torch', torch.__version__, '| torchvision', torchvision.__version__, '| torchaudio', torchaudio.__version__)"
+
+
+FROM python:3.11-slim AS runtime
+
+RUN apt-get update && \
+    apt-get install -y curl ffmpeg && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Create non-root user and necessary directories
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /home/appuser/.cache/huggingface && \
+    mkdir -p /home/appuser/.config/matplotlib && \
+    mkdir -p /Whisper-WebUI-Swear-Removal && \
+    chown -R appuser:appuser /home/appuser && \
+    chown -R appuser:appuser /Whisper-WebUI-Swear-Removal
+
+WORKDIR /Whisper-WebUI-Swear-Removal
+
+COPY --from=builder --chown=appuser:appuser /Whisper-WebUI-Swear-Removal/venv /Whisper-WebUI-Swear-Removal/venv
+COPY --chown=appuser:appuser . .
+
+# Create volume directories
+RUN mkdir -p /Whisper-WebUI-Swear-Removal/models /Whisper-WebUI-Swear-Removal/outputs
+
+VOLUME [ "/Whisper-WebUI-Swear-Removal/models" ]
+VOLUME [ "/Whisper-WebUI-Swear-Removal/outputs" ]
+
+# Set environment variables for cache and config directories
+ENV PATH="/Whisper-WebUI-Swear-Removal/venv/bin:$PATH"
+ENV HF_HOME="/home/appuser/.cache/huggingface"
+ENV MPLCONFIGDIR="/home/appuser/.config/matplotlib"
+ENV PYTHONPATH="/Whisper-WebUI-Swear-Removal"
+
+USER appuser
+
+ENTRYPOINT [ "python", "app.py" ]
