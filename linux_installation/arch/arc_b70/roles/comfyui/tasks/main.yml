@@ -91,6 +91,31 @@
     - "{{ arc_b70_comfyui_dir }}/input"
     - "{{ arc_b70_comfyui_dir }}/user"
 
+# Chown the CONTENTS too, and this is not decoration. The task above chowns the
+# directory inode only, so files left inside by the pre-cutover ROOT run keep
+# their owner. Here comfyui.db and comfyui.db.lock were root:root, and the
+# UID-10001 container lost its queue/history database with
+#   [ERROR] Failed to initialize database... [Errno 13] Permission denied:
+#     '/opt/comfyui/user/comfyui.db.lock'
+# ComfyUI starts anyway -- it falls back to a non-persistent queue -- which is
+# why this survived the cutover verification. The native installs also ran as
+# root, so output/ carries root-owned renders from that era. Measured
+# 2026-11-18.
+#
+# Ownership only, no mode: the task above sets 0755 on the directories, and
+# repeating that here would mark comfyui.db executable.
+- name: Ensure existing files inside the writable mounts belong to the container user
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    recurse: true
+    owner: '10001'
+    group: '10001'
+  loop:
+    - "{{ arc_b70_comfyui_dir }}/output"
+    - "{{ arc_b70_comfyui_dir }}/input"
+    - "{{ arc_b70_comfyui_dir }}/user"
+
 - name: Deploy the ComfyUI probe workflow into the build context
   ansible.builtin.copy:
     src: workflows/h3_probe_api.json

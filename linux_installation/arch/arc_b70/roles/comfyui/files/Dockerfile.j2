@@ -66,9 +66,20 @@ RUN pip install --no-cache-dir \
 # scheme, so pinning it to torch's version would name a version that does not
 # exist.
 #
+# The constraint file names torch and pandas.
+#
+# torch: torchvision versions on its own 0.x scheme, so pinning it to torch's
+# version would name a version that does not exist.
+#
+# pandas: this is what disarms the poisoned pin described below. stable-audio-
+# tools pins pandas==2.0.2, which predates Python 3.12 and therefore has NO
+# cp312 wheel -- pip falls back to the sdist, whose isolated build env dies with
+# "ModuleNotFoundError: No module named 'pkg_resources'". Constraining pandas to
+# a cp312-compatible release lets the closure resolve instead of being skipped.
+#
 # It is created here rather than assumed: without it the --constraint flag
 # fails the build with "failed to read constraint file".
-RUN printf 'torch=={{ arc_b70_xpu_torch_version }}\n' > /tmp/constraints.txt
+RUN printf 'torch=={{ arc_b70_xpu_torch_version }}\npandas>=2.2,<2.3\n' > /tmp/constraints.txt
 
 # --no-deps on the requirements, then the dependency closures with
 # --extra-index-url plus the same constraint.
@@ -122,48 +133,114 @@ RUN set -eux; \
       grep -viE '^\s*(flash[-_]attn|onnxruntime-gpu|torch|torchaudio|torchvision)\b' "$req" > "$out"; \
     done
 
-# Dependencies are NOT skipped here. --no-deps on the filtered files installs
-# the directly-named packages and nothing else, so their transitive
-# dependencies never land: comfyui_controlnet_aux pulls matplotlib, matplotlib
-# needs pyparsing, and the node fails at import with
-# "ModuleNotFoundError: No module named 'pyparsing'" -- which kills ComfyUI at
-# start-up, not at render time. Measured 2026-11-17 against the first build of
-# this recipe.
+# Dependencies are NOT skipped here -- with --no-deps this node never imports.
+# Its requirements name aeiou and stable-audio-tools directly, and aeiou's own
+# closure is 19 packages (accelerate, holoviews, wandb, webdataset, plotly,
+# umap-learn, ...). --no-deps installed aeiou without any of them, so the node
+# failed one missing module per rebuild: first librosa, then opentelemetry, then
+# whatever was next. That is not a bug to patch one module at a time.
 #
-# The two nodes that pull a hard-pinned OLD package stay on --no-deps; the one
-# that actually needs its closure resolves with deps. Measured 2026-11-17, and
-# each half is load-bearing:
+# Two separate pins block a plain `pip install -r`:
 #
-#   ComfyUI-StableAudioSampler -> stable-audio-tools -> pandas==2.0.2.
-#   pandas 2.0.2 predates Python 3.12, so it has NO cp312 wheel; pip falls back
-#   to the sdist and the isolated build env dies with
-#   "ModuleNotFoundError: No module named 'pkg_resources'". --no-deps is what
-#   keeps that transitive pin out of the resolve.
+#   stable-audio-tools -> pandas==2.0.2, which predates Python 3.12 and has no
+#   cp312 wheel, so resolving it compiles the sdist and dies on pkg_resources.
+#   Disarmed by the pandas constraint in /tmp/constraints.txt.
 #
-#   comfyui_controlnet_aux -> scikit-image/matplotlib -> pyparsing. With
-#   --no-deps those never arrive, and the node fails at IMPORT:
-#   "ModuleNotFoundError: No module named 'pyparsing'", which kills ComfyUI at
-#   start-up rather than at render time.
+#   stable-audio-tools -> flash-attn>=2.5.0, declared UNCONDITIONALLY in its
+#   metadata, so the grep filter above cannot see it (that only rewrites the
+#   requirement files). flash-attn has no wheel at all: pip downloads the 8.5 MB
+#   sdist and dies in its build backend, because building it needs nvcc.
+#   Disarmed by installing stable-audio-tools itself with --no-deps and then
+#   installing its own Requires-Dist list with flash-attn removed. The node does
+#   not import flash_attn; only stable-audio-tools' training paths do.
 #
-# So the fix is not one flag for all three: skip deps where the closure is
-# poisoned, take deps where the closure is required.
-RUN pip install --no-cache-dir --no-deps \
+# aeiou and the two loose requirements resolve normally, with deps.
+RUN pip install --no-cache-dir \
+      --extra-index-url https://download.pytorch.org/whl/xpu \
       --constraint /tmp/constraints.txt \
-      -r /opt/comfyui/custom_nodes/ComfyUI-StableAudioSampler/requirements-xpu.txt
-RUN pip install --no-cache-dir --no-deps \
+      aeiou einops numpy
+RUN pip install --no-cache-dir --no-deps --constraint /tmp/constraints.txt stable-audio-tools
+
+# stable-audio-tools' declared dependencies, minus the CUDA-only ones, minus
+# the torch family (already correct, and reinstalling it would replace the XPU
+# wheel), minus pandas, and with every EXACT pin removed.
+#
+# Two things are being worked around here, and both are the same root cause --
+# this package's metadata predates Python 3.12 by a wide margin:
+#
+#   pandas         pinned EXACTLY (pandas==2.0.2), and a pip constraint cannot
+#                  override an exact requirement -- pip reports
+#                  ResolutionImpossible rather than picking 2.2. So the pin is
+#                  not passed at all; pandas arrives from aeiou's closure above,
+#                  where the >=2.2,<2.3 constraint in /tmp/constraints.txt
+#                  applies.
+#
+#   PyWavelets     pinned EXACTLY too (==1.4.1), which also has no cp312 wheel,
+#                  so pip builds the sdist and dies in its C build. Same story
+#                  for whichever pin is next: the versions in this metadata were
+#                  written before these packages shipped 3.12 wheels.
+#
+# So exact pins are stripped from the whole extracted list (>=, <, ~= are kept
+# -- they express real compatibility ranges), and pip resolves wheel-available
+# versions. Markers are stripped because they are not valid pip arguments.
+#
+# Read from the installed metadata rather than hardcoded, so a bump of
+# stable-audio-tools cannot silently leave a dependency out.
+RUN set -eux; \
+    deps="$(python -c 'import importlib.metadata as m, re; skip={"flash-attn","flash_attn","torch","torchaudio","torchvision","triton","pandas"}; s=[x.split(";")[0].strip() for x in (m.requires("stable-audio-tools") or [])]; s=[re.sub(r"==[0-9][^,]*", "", x).strip() for x in s]; s=[x for x in s if x and re.split(r"[<>=!~\[ ]", x, maxsplit=1)[0].lower().replace("_","-") not in skip]; print(" ".join(s))')"; \
+    pip install --no-cache-dir \
+      --extra-index-url https://download.pytorch.org/whl/xpu \
       --constraint /tmp/constraints.txt \
-      -r /opt/comfyui/custom_nodes/TTS-Audio-Suite/requirements-xpu.txt
+      $deps
+
+# comfyui_controlnet_aux is with-deps for the same class of reason: --no-deps
+# left out pyparsing (via matplotlib) and the node failed at IMPORT, which kills
+# ComfyUI at start-up rather than at render time.
 RUN pip install --no-cache-dir \
       --constraint /tmp/constraints.txt \
       -r /opt/comfyui/custom_nodes/comfyui_controlnet_aux/requirements-xpu.txt
+RUN pip install --no-cache-dir \
+      --extra-index-url https://download.pytorch.org/whl/xpu \
+      --constraint /tmp/constraints.txt \
+      -r /opt/comfyui/custom_nodes/TTS-Audio-Suite/requirements-xpu.txt
 
 # onnxruntime-gpu was filtered out above, so the CPU build is what lands. The
 # nodes import "onnxruntime" and need the real package.
 RUN pip install --no-cache-dir --no-deps onnxruntime
 
+# openai-whisper (a TTS-Audio-Suite requirement) declares triton>=2, and that is
+# the CUDA-only package. It cannot be filtered out at the requirements level the
+# way flash-attn can, because it is TRANSITIVE -- the grep filter only rewrites
+# the direct requirement files.
+#
+# Uninstalling it is NOT enough on its own, and the first attempt at this proved
+# it: triton-xpu and triton both install a package directory called `triton`, so
+# removing the CUDA distribution deletes files the XPU one needs, and torch dies
+# at import with
+#   AttributeError: module 'triton' has no attribute 'language'
+# (torch._dynamo/utils.py does `import triton` and reads triton.language.dtype).
+# So triton-xpu is force-reinstalled immediately afterwards, at whatever version
+# is already installed -- repinning it here would drift against torch's own pin.
+# It must come from the PyTorch XPU index: triton-xpu is not published on PyPI,
+# and asking PyPI for it fails with "No matching distribution found".
+#
+# The final assertion below then sees triton-xpu (which does not match its
+# `^(nvidia-|cuda-|triton==)` pattern) and no bare triton.
+RUN pip uninstall -y triton; \
+    pip install --no-cache-dir --force-reinstall --no-deps \
+      --index-url https://download.pytorch.org/whl/xpu \
+      "triton-xpu==$(python -c 'import importlib.metadata as m; print(m.version("triton-xpu"))')"
+
 # The assertion that makes a silently CPU-only image impossible. It reads the
 # image's OWN torch: "+xpu" in the version proves the XPU wheel is the one
 # installed, and torch.version.cuda is None proves nothing displaced it.
+#
+# The second line is not redundant: importing torch is not the same as importing
+# torch._dynamo, and that is where a broken triton shows up. A build once shipped
+# with `triton` uninstalled but triton-xpu's files removed alongside it, and the
+# version check passed while the container died at start-up with
+# "module 'triton' has no attribute 'language'". The import check catches that
+# at build time instead.
 #
 # It does NOT prove the device is usable: a build has no device pass-through,
 # so torch.xpu.is_available() inside a build layer is False by construction.
@@ -171,6 +248,7 @@ RUN pip install --no-cache-dir --no-deps onnxruntime
 # /dev/dri passed through (Task 8).
 RUN set -eux; \
     python -c "import torch; v=torch.__version__; assert '+xpu' in v, v; assert torch.version.cuda is None, torch.version.cuda; print('FINAL-TORCH', v)"; \
+    python -c "import torch._dynamo, triton; print('TORCH-IMPORTS-OK', triton.__version__)"; \
     pip list --format=freeze | grep -iE '^(nvidia-|cuda-|triton==)' && { echo 'CUDA-PACKAGES-PRESENT'; exit 1; } || echo 'NO-CUDA-PACKAGES'
 
 # The non-root runtime user. UID 10001 is shared with the FishTTS image so
@@ -182,7 +260,15 @@ RUN set -eux; \
 # has to be created here, owned by the runtime user.
 RUN useradd -u 10001 -m -s /usr/bin/nologin comfy \
  && mkdir -p /opt/comfyui/output /opt/comfyui/input /opt/comfyui/user /opt/comfyui/temp \
- && chown -R 10001:10001 /opt/comfyui/output /opt/comfyui/input /opt/comfyui/user /opt/comfyui/temp
+ && chown -R 10001:10001 /opt/comfyui/output /opt/comfyui/input /opt/comfyui/user /opt/comfyui/temp /opt/comfyui/custom_nodes
+
+# custom_nodes is chowned as well, and it is load-bearing: the git clones above
+# land root-rooted. TTS-Audio-Suite creates its own .cache directory at import
+# and died with
+#   PermissionError: [Errno 13] Permission denied:
+#     '/opt/comfyui/custom_nodes/TTS-Audio-Suite/.cache'
+# which does NOT fail the container -- ComfyUI logs "Cannot import ... module
+# for custom nodes" and starts without that node's types. Measured 2026-11-18.
 
 # Models are a MOUNT POINT. The directory exists so the bind mount has
 # somewhere to land; it is never populated in the image.
