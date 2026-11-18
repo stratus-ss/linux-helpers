@@ -1,0 +1,90 @@
+---
+# nas_mounts -- the /AIStuff export, and the shared model set inside it.
+#
+# There is ONE mount. /storage/AI is already exported to * on the NAS, so the
+# model set lives in a subdirectory of that same export (/storage/AI/ai_models)
+# and needs no dataset, no /etc/exports change, and no second mount.
+#
+# The nfs kernel module must be loaded before any mount attempt: without it,
+# mount.nfs reports the misleading "failed to apply fstab options".
+
+- name: Ensure NFS client packages present
+  ansible.builtin.pacman:
+    name:
+      - nfs-utils
+    state: present
+
+- name: Load the nfs kernel module
+  ansible.builtin.command:
+    cmd: modprobe nfs
+  changed_when: false
+
+- name: Persist the nfs kernel module
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/nfs.conf
+    content: "nfs\n"
+    mode: '0644'
+
+- name: Ensure AIStuff mountpoint exists
+  ansible.builtin.file:
+    path: "{{ arc_b70_aistuff_mount }}"
+    state: directory
+    mode: '0755'
+
+- name: Persist AIStuff mount
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: "{{ arc_b70_nas_host }}:{{ arc_b70_nas_dataset }} {{ arc_b70_aistuff_mount }} nfs {{ arc_b70_nfs_options }} 0 0"
+    regexp: '^.*:/storage/AI\s'
+
+# findmnt -M matches the path as a mount TARGET and exits 1 when it is not one.
+# findmnt -T would resolve to the containing mount and exit 0 for any existing
+# path, so the mount would be skipped on a fresh host.
+- name: Check whether AIStuff is already mounted
+  ansible.builtin.command:
+    cmd: "findmnt -M {{ arc_b70_aistuff_mount }}"
+  register: arc_b70_mount_aistuff_check
+  changed_when: false
+  failed_when: false
+
+- name: Mount AIStuff
+  ansible.builtin.command:
+    cmd: "mount {{ arc_b70_aistuff_mount }}"
+  register: arc_b70_mount_aistuff
+  when: arc_b70_mount_aistuff_check.rc != 0
+  changed_when: true
+
+# Verification uses -T: the question here is which filesystem provides the path.
+- name: Verify AIStuff is mounted
+  ansible.builtin.command:
+    cmd: "findmnt -T {{ arc_b70_aistuff_mount }}"
+  register: arc_b70_findmnt_aistuff
+  changed_when: false
+  failed_when: "arc_b70_nas_dataset not in arc_b70_findmnt_aistuff.stdout"
+
+# -- the shared model set lives on the NAS ------------------------------
+# The 121 GB ComfyUI set stays here as the canonical copy; the comfyui role
+# rsyncs it onto the B70's local XFS from here.
+# Checked through the mount the host already has, NOT over an SSH hop. The
+# previous version delegated to stratus-desktop because the controller could not
+# reach the NAS directly; that hop (a) reached a host this plan must not act on,
+# (b) reported the whole play as unreachable=1 whenever that host was offline,
+# and (c) was pointless from here -- /AIStuff IS /storage/AI, so the file can be
+# seen on the mounted path with no extra host involved.
+- name: Check whether the model set is on the NAS
+  ansible.builtin.command:
+    cmd: "ls {{ arc_b70_models_mount }}/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+  register: arc_b70_models_present
+  changed_when: false
+  failed_when: false
+
+- name: Assert the shared model set is on the NAS
+  ansible.builtin.assert:
+    that:
+      - arc_b70_models_present.rc == 0
+    fail_msg: >-
+      The shared model set is missing from {{ arc_b70_models_mount }} (which is
+      {{ arc_b70_models_dataset }} on the NAS, read through the /AIStuff export).
+      The model_set check is the only gate before ComfyUI rsyncs it onto the
+      B70's local disk.
+    quiet: true

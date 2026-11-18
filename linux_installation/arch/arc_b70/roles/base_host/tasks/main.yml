@@ -1,0 +1,109 @@
+---
+# base_host — Docker daemon, the arc path layout, and a swapfile.
+#
+# Exactly one swap activation path exists per run: steps 8/9 activate it during
+# the play when it is not already active, and swapfile.service handles it at
+# boot. There is no handler; a handler re-running swapon would be the duplicate
+# activation the role forbids.
+
+- name: Gather host facts
+  ansible.builtin.setup:
+
+# The package DB refresh is separated out because it is metadata, not a change
+# to the machine. With update_cache on the install task, the module reports
+# changed whenever it refreshes the index -- so an otherwise converged play
+# reported changed=1 on a second run purely because a mirror had been
+# re-synced. Measured: the pacman log showed only "synchronizing package
+# lists" around that run, no installs and no upgrades.
+- name: Refresh the package database
+  community.general.pacman:
+    update_cache: true
+  changed_when: false
+
+- name: Ensure base packages present
+  community.general.pacman:
+    name:
+      - git
+      - curl
+      - jq
+      - rsync
+      - tar
+      - unzip
+      - screen
+      - base-devel
+      - python3
+      - python-pip
+      # ffprobe is the acceptance instrument for the FishTTS clone (Task 8),
+      # the FishTTS WebUI service (Task 14) and the ComfyUI H3 render
+      # (Task 7). Without it the acceptance steps have nothing to run.
+      - ffmpeg
+    state: present
+
+- name: Create arc root directory
+  ansible.builtin.file:
+    path: "{{ arc_b70_root }}"
+    state: directory
+    mode: '0755'
+
+- name: Ensure Docker is installed
+  ansible.builtin.pacman:
+    name:
+      - docker
+      - docker-compose
+    state: present
+
+- name: Enable and start Docker daemon
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Create swapfile
+  ansible.builtin.command:
+    cmd: "fallocate -l {{ arc_b70_swap_size }} {{ arc_b70_swapfile }}"
+    creates: "{{ arc_b70_swapfile }}"
+
+- name: Set swapfile permissions
+  ansible.builtin.file:
+    path: "{{ arc_b70_swapfile }}"
+    mode: '0600'
+
+# The probe must exist: steps 8 and 9 read its stdout string. Testing the
+# registered dict directly would always be truthy, and mkswap would never run.
+- name: Probe the active swap table
+  ansible.builtin.command:
+    cmd: swapon --show=NAME --noheadings
+  register: arc_b70_swapon_probe
+  changed_when: false
+
+- name: Initialize swapfile
+  ansible.builtin.command:
+    cmd: "mkswap {{ arc_b70_swapfile }}"
+  register: arc_b70_mkswap
+  when: arc_b70_swapfile not in (arc_b70_swapon_probe.stdout | default(''))
+
+- name: Enable swapfile
+  ansible.builtin.command:
+    cmd: "swapon {{ arc_b70_swapfile }}"
+  register: arc_b70_swapon
+  when: arc_b70_swapfile not in (arc_b70_swapon_probe.stdout | default(''))
+  changed_when: true
+
+- name: Persist swapfile in fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: "{{ arc_b70_swapfile }} none swap defaults 0 0"
+    regexp: '^/swapfile\s'
+
+- name: Create swapfile systemd unit
+  ansible.builtin.template:
+    src: swapfile.service.j2
+    dest: /etc/systemd/system/swapfile.service
+    mode: '0644'
+
+- name: Enable swapfile unit
+  ansible.builtin.systemd_service:
+    name: swapfile
+    state: started
+    enabled: true
+    daemon_reload: true

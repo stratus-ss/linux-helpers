@@ -1,0 +1,15 @@
+[Unit]
+Description=Enable the ARC swapfile
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# swapon on an ALREADY-active swapfile returns EBUSY, which would fail a
+# Type=oneshot unit. The shell wrapper treats EBUSY as success, so the unit
+# converges on the same state whether it is the first activation or a re-run.
+ExecStart=/bin/sh -c '/usr/bin/swapon {{ arc_b70_swapfile }} 2>/dev/null || /usr/bin/swapon --show=NAME --noheadings | grep -qx {{ arc_b70_swapfile }}'
+ExecStop=/usr/bin/swapoff {{ arc_b70_swapfile }}
+
+[Install]
+WantedBy=multi-user.target

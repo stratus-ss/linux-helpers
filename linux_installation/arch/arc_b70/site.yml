@@ -1,0 +1,81 @@
+---
+# Arc Pro B70 AI workstation — twelve plays, one per role.
+# Every play carries a tags: list so a per-role run (`--tags <role>`) selects
+# that role's tasks; an untagged play would make every --tags run vacuous.
+- name: Base host provisioning
+  hosts: arc_b70
+  become: true
+  tags: [base_host]
+  roles:
+    - base_host
+
+- name: NAS mounts and shared model dataset
+  hosts: arc_b70
+  become: true
+  tags: [nas_mounts]
+  roles:
+    - nas_mounts
+
+- name: Intel GPU XPU runtime stack
+  hosts: arc_b70
+  become: true
+  tags: [intel_gpu]
+  roles:
+    - intel_gpu
+
+- name: ComfyUI application and model set
+  hosts: arc_b70
+  become: true
+  tags: [comfyui]
+  roles:
+    - comfyui
+
+- name: Fish Audio S2-Pro on XPU
+  hosts: arc_b70
+  become: true
+  tags: [fish_speech]
+  roles:
+    - fish_speech
+
+- name: GPU admission queue
+  hosts: arc_b70
+  become: true
+  tags: [gpu_queue]
+  roles:
+    - gpu_queue
+
+- name: MiniMax H3 native SYCL engine
+  hosts: arc_b70
+  become: true
+  tags: [h3_engine]
+  roles:
+    - h3_engine
+
+- name: Whisper WebUI
+  hosts: arc_b70
+  become: true
+  tags: [whisper_webui]
+  roles:
+    - whisper_webui
+
+- name: Frigate NVR (OpenVINO detector, VAAPI decode)
+  hosts: arc_b70
+  become: true
+  tags: [frigate]
+  roles:
+    - frigate
+
+- name: ebook2audiobook (XTTS-v2 on XPU)
+  hosts: arc_b70
+  become: true
+  tags: [ebook2audiobook]
+  roles:
+    - ebook2audiobook
+
+- name: FishTTS service (S2-Pro api_server + WebUI)
+  hosts: arc_b70
+  become: true
+  tags: [fishtts_service]
+  roles:
+    - fishtts_service
+

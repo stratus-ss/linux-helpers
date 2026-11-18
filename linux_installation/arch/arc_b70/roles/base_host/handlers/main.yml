@@ -1,0 +1,5 @@
+---
+# Deliberately empty. The swapfile is activated by swapfile.service and Docker
+# is managed directly by ansible.builtin.systemd_service; a handler re-running
+# swapon would be the duplicate activation the role forbids.
+[]

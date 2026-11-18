@@ -1,0 +1,7 @@
+---
+# ansible.builtin.pacman is a redirect to community.general.pacman. Declaring
+# the collection keeps the seven package tasks working on a controller that does
+# not happen to have it installed already.
+collections:
+  - name: community.general
+    version: ">=10.0.0"
