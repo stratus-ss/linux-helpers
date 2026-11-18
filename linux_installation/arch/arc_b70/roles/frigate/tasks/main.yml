@@ -103,10 +103,18 @@
   changed_when: false
   failed_when: false
 
+# The positive check ALONE is unsound, and this cost two safe-mode boots on
+# 2026-11-18. When the config is rejected the image does not stop: it prints
+# "Your config file is not valid!", falls back to safe mode, and then prints
+# "Your config file is valid." for the DEFAULT config it loads instead. Both
+# strings are therefore present in one run (measured: 1 positive, 2 negative),
+# so testing only for the positive one passes on exactly the configs this task
+# exists to catch. The negative check is the one that has teeth.
 - name: Assert the Frigate config is valid
   ansible.builtin.assert:
     that:
       - "'Your config file is valid.' in arc_b70_frigate_validate.stdout"
+      - "'not valid' not in arc_b70_frigate_validate.stdout"
     fail_msg: >-
       Frigate rejected the rendered config. The container would boot on the
       pydantic defaults (a CPU detector, no cameras) instead. Validator
@@ -133,6 +141,26 @@
       The rendered Frigate config enables recording on at least one camera.
       Refusing to start the container. Camera record flags:
       {{ (frigate_rendered.content | b64decode | from_yaml).cameras | dict2items | map(attribute='key') | list }}
+    quiet: true
+
+# Every camera must consume a go2rtc restream, and every restream must exist.
+# Without the first, MSE is unavailable and the UI falls back to jsmpeg, which
+# spawns a CPU mpeg1video re-encoder per viewer per camera. Without the second,
+# the camera has no stream at all and reports camera_fps: 0.
+- name: Assert every camera consumes a go2rtc restream
+  ansible.builtin.assert:
+    that:
+      - (frigate_rendered.content | b64decode | from_yaml).cameras | dict2items
+        | map(attribute='value.ffmpeg.inputs') | flatten | map(attribute='path')
+        | reject('match', '^rtsp://127\.0\.0\.1:8554/') | list | length == 0
+      - (frigate_rendered.content | b64decode | from_yaml).go2rtc.streams | length
+        == (frigate_rendered.content | b64decode | from_yaml).cameras | length
+      - (frigate_rendered.content | b64decode | from_yaml).go2rtc.streams.keys() | sort
+        == (frigate_rendered.content | b64decode | from_yaml).cameras.keys() | sort
+    fail_msg: >-
+      Camera inputs must all be rtsp://127.0.0.1:8554/<name> and there must be
+      one go2rtc stream per camera. Inputs:
+      {{ (frigate_rendered.content | b64decode | from_yaml).cameras | dict2items | map(attribute='value.ffmpeg.inputs') | flatten | map(attribute='path') | list }}
     quiet: true
 
 # findmnt prints the SOURCE DEVICE, not the filesystem label: asserting on the
@@ -211,6 +239,21 @@
 # reporting "ok" while the container still serves the old config. Comparing
 # the running container's config against the file on disk is the only signal
 # that cannot go stale.
+#
+# Every camera must reach its stream THROUGH go2rtc (rtsp://127.0.0.1:8554/),
+# and that is one of the compared fields for a concrete reason: on 2026-11-18
+# the cameras were re-pointed from direct RTSP to restreams, the file on disk
+# was correct, and the role reported changed=1 failed=0 while the container kept
+# serving the OLD config -- same camera count, same GPU detector, so none of the
+# other conditions fired. go2rtc only reads its stream list at start-up, so the
+# new cameras simply had no restream and stayed on jsmpeg.
+#
+# The test is "any input that is NOT the local restream", not "any input that
+# matches the camera URL". Frigate MASKS credentials in /api/config -- a camera
+# path reads back as rtsp://*:*@192.168.98.240:554/... -- so a pattern anchored
+# on the username matches nothing and the trigger silently never fires. Measured
+# 2026-11-18: the first version of this clause used '^rtsp://admin:' and the
+# role reported changed=0 while the container kept serving the old config.
 - name: Read the config the running container is serving
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ arc_b70_frigate_port }}/api/config"
@@ -230,6 +273,9 @@
     or (arc_b70_frigate_running_config.json.detectors | default({}) | length) != 1
     or (arc_b70_frigate_running_config.json.detectors.ov.device | default('')) != 'GPU'
     or (arc_b70_frigate_running_config.json.cameras | default({}) | length) != (arc_b70_frigate_cameras | length)
+    or (arc_b70_frigate_running_config.json.cameras | default({}) | dict2items
+        | map(attribute='value.ffmpeg.inputs') | flatten | map(attribute='path')
+        | reject('match', '^rtsp://127\\.0\\.0\\.1:8554/') | list | length) > 0
   changed_when: true
 
 - name: Wait for Frigate to answer

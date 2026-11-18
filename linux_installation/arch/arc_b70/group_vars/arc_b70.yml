@@ -199,20 +199,46 @@ arc_b70_frigate_rtsp_password: >-
 # CHANGE_ME is substituted with arc_b70_frigate_rtsp_password at render time.
 # Production has detect.enabled: false on every camera (record-only). This
 # deployment is the first to actually run detection, and it records nothing.
+# 10 cameras, every one consuming a go2rtc restream.
+#
+# Two reasons this is uniform rather than a mix of direct and restreamed:
+#
+#   1. MSE live view is served THROUGH go2rtc. A camera with no go2rtc stream
+#      cannot do MSE and the UI silently falls back to jsmpeg, which spawns a
+#      per-viewer ffmpeg that re-encodes already-decoded frames to mpeg1video on
+#      the CPU -- no hardware path exists for that encoder. Before this, five
+#      cameras were on jsmpeg for that reason alone and 12 such processes were
+#      alive whenever the UI was open.
+#
+#   2. Frigate pulls the RTSP stream ONCE per input. The direct cameras carried
+#      two identical inputs (record role + detect role), so the camera was
+#      serving the same stream twice. Through go2rtc it is one pull, and both
+#      roles consume it locally.
+#
+# The restream points at each camera's MAIN profile, which is what the inputs
+# used before, so nothing about resolution or decode cost changes -- except that
+# the five cameras previously restreaming the SUB profile now get main-quality
+# live view. Point a camera at ..._sub instead if its CPU/bandwidth matters more
+# than its picture.
+#
+# CHANGE_ME is substituted with arc_b70_frigate_rtsp_password at render time.
+# Production has detect.enabled: false on every camera (record-only); this
+# deployment records nothing and runs detection only when
+# arc_b70_frigate_detect_enabled is true.
 arc_b70_frigate_cameras:
   doorbell:
     detect_enabled: true
     inputs:
-      - path: "rtsp://admin:CHANGE_ME@192.168.98.243:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/doorbell"
         roles: [record]
-      - path: "rtsp://admin:CHANGE_ME@192.168.98.243:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/doorbell"
         roles: [detect]
   chicken_outside:
     detect_enabled: true
     inputs:
-      - path: "rtsp://admin:CHANGE_ME@192.168.98.246:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/chicken_outside"
         roles: [record]
-      - path: "rtsp://admin:CHANGE_ME@192.168.98.246:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/chicken_outside"
         roles: [detect]
   chicken_inside:
     detect_enabled: true
@@ -238,44 +264,49 @@ arc_b70_frigate_cameras:
   backyard:
     detect_enabled: true
     inputs:
-      - path: "rtsp://admin:CHANGE_ME@192.168.98.240:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/backyard"
         roles: [record]
-      - path: "rtsp://admin:CHANGE_ME@192.168.98.240:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/backyard"
         roles: [detect]
   driveway:
     detect_enabled: true
     inputs:
-      - path: "rtsp://admin:CHANGE_ME@192.168.98.244:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/driveway"
         roles: [record]
-      - path: "rtsp://admin:CHANGE_ME@192.168.98.244:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/driveway"
         roles: [detect]
   school_room:
     detect_enabled: true
     inputs:
-      - path: "rtsp://admin:CHANGE_ME@192.168.101.1:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/school_room"
         roles: [record]
-      - path: "rtsp://admin:CHANGE_ME@192.168.101.1:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/school_room"
         roles: [detect]
   driveway2_reolink:
     detect_enabled: true
     inputs:
-      - path: "rtsp://admin:CHANGE_ME@192.168.101.2:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/driveway2_reolink"
         roles: [record]
-      - path: "rtsp://admin:CHANGE_ME@192.168.101.2:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/driveway2_reolink"
         roles: [detect]
   coop_3_season_reolink:
     detect_enabled: true
     inputs:
-      - path: "rtsp://admin:CHANGE_ME@192.168.101.87:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/coop_3_season_reolink"
         roles: [record]
-      - path: "rtsp://admin:CHANGE_ME@192.168.101.87:554/h264Preview_01_main"
+      - path: "rtsp://127.0.0.1:8554/coop_3_season_reolink"
         roles: [detect]
 arc_b70_frigate_go2rtc_streams:
-  garage: "rtsp://admin:CHANGE_ME@192.168.98.245:554/h264Preview_01_sub"
-  driveway: "rtsp://admin:CHANGE_ME@192.168.98.244:554/h264Preview_01_sub"
-  peeps: "rtsp://admin:CHANGE_ME@192.168.98.242:554/h264Preview_01_sub"
-  chicken_inside: "rtsp://admin:CHANGE_ME@192.168.98.241:554/h264Preview_01_sub"
-  chicken_outside: "rtsp://admin:CHANGE_ME@192.168.98.246:554/h264Preview_01_sub"
+  doorbell: "rtsp://admin:CHANGE_ME@192.168.98.243:554/h264Preview_01_main"
+  chicken_outside: "rtsp://admin:CHANGE_ME@192.168.98.246:554/h264Preview_01_main"
+  chicken_inside: "rtsp://admin:CHANGE_ME@192.168.98.241:554/h264Preview_01_main"
+  garage: "rtsp://admin:CHANGE_ME@192.168.98.245:554/h264Preview_01_main"
+  peeps: "rtsp://admin:CHANGE_ME@192.168.98.242:554/h264Preview_01_main"
+  backyard: "rtsp://admin:CHANGE_ME@192.168.98.240:554/h264Preview_01_main"
+  driveway: "rtsp://admin:CHANGE_ME@192.168.98.244:554/h264Preview_01_main"
+  school_room: "rtsp://admin:CHANGE_ME@192.168.101.1:554/h264Preview_01_main"
+  driveway2_reolink: "rtsp://admin:CHANGE_ME@192.168.101.2:554/h264Preview_01_main"
+  coop_3_season_reolink: "rtsp://admin:CHANGE_ME@192.168.101.87:554/h264Preview_01_main"
 
 # -- ebook2audiobook (Task 13) ----------------------------------------------
 arc_b70_e2a_dir: "{{ arc_b70_root }}/ebook2audiobook"

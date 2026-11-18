@@ -25,19 +25,6 @@ ffmpeg:
 #     detector is explicitly ignored by the config validator ("The model key
 #     should be specified at the root level of the config"), which silently
 #     leaves the detector on its default device.
-# Live view transport. The default is jsmpeg, which makes Frigate spawn one
-# extra ffmpeg PER VIEWER PER CAMERA that reads already-decoded raw frames from
-# a pipe and re-encodes them to mpeg1video. That encoder has no hardware path,
-# so those processes are pure CPU and never appear on the GPU -- 12 of them were
-# running on 2026-11-18 simply because a browser tab had the UI open.
-#
-# mse hands the browser the camera's ORIGINAL H.264/H.265 stream and lets it
-# decode, so no re-encode happens at all and those processes never spawn.
-# webrtc does the same with a peer connection (lower latency, more moving
-# parts). Set a camera's own `live: mode:` to override this per camera.
-live:
-  mode: mse
-
 detectors:
   ov:
     type: openvino
