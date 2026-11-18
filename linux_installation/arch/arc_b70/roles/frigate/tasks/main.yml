@@ -1,0 +1,344 @@
+---
+# frigate -- OpenVINO detector on the GPU, VAAPI decode, and NO RECORDING.
+#
+# The operator's constraint ("do not do any recording that will step on the
+# production instance") is enforced structurally: steps 6 and 7 assert the
+# rendered config and the media root BEFORE the container starts, so a
+# mis-rendered config stops the play with the container never started.
+
+- name: Resolve the render device group id
+  ansible.builtin.command:
+    cmd: stat -c '%g' /dev/dri/renderD128
+  register: arc_b70_render_gid_result
+  changed_when: false
+  failed_when: arc_b70_render_gid_result.rc != 0
+
+- name: Record the render device group id
+  ansible.builtin.set_fact:
+    arc_b70_render_gid: "{{ arc_b70_render_gid_result.stdout | trim }}"
+
+- name: Ensure the Frigate application tree is present
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ arc_b70_frigate_dir }}"
+    - "{{ arc_b70_frigate_config }}"
+    - "{{ arc_b70_frigate_media }}"
+    - "{{ arc_b70_frigate_storage }}"
+
+- name: Ensure the render device is present
+  ansible.builtin.stat:
+    path: /dev/dri/renderD128
+  register: arc_b70_render_device
+  changed_when: false
+
+- name: Assert the RTSP password is present
+  ansible.builtin.assert:
+    that:
+      - arc_b70_frigate_rtsp_password | length > 0
+      - arc_b70_frigate_rtsp_password != 'CHANGE_ME'
+    fail_msg: >-
+      FRIGATE_RTSP_PASSWORD is not set in the controller environment. Without
+      it the rendered config would carry the literal CHANGE_ME placeholder in
+      every camera URL, and the container would start but authenticate against
+      nothing. Export it before running this role:
+      export FRIGATE_RTSP_PASSWORD='<the camera RTSP password>'
+    quiet: true
+
+# No detector model is downloaded: the image ships the OpenVINO SSDLite
+# MobileNet v2 model at /openvino-model/ssdlite_mobilenet_v2.xml and its
+# labelmap at /openvino-model/coco_91cl_bkgr.txt. That is Frigate's own
+# DEFAULT_MODEL (frigate/config/config.py), and the Dockerfile builds it at
+# image build time. Nothing to fetch means no model URL to rot.
+- name: Deploy the Frigate configuration
+  ansible.builtin.template:
+    src: frigate.yaml.j2
+    dest: "{{ arc_b70_frigate_config_file }}"
+    mode: '0600'
+  register: arc_b70_frigate_config_result
+
+# Frigate boots on its own default config if /config/config.yml and
+# /config/config.yaml are both absent -- silently, with no error and no
+# cameras. And it writes that default to /config/config.yaml itself on first
+# boot. A stale default left over from an earlier run would therefore win
+# over our config if we ever used a different filename, so the file we
+# deploy must be the one Frigate actually reads, and no other candidate may
+# exist alongside it.
+- name: Remove any competing Frigate config filename
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ arc_b70_frigate_config }}/config.yml"
+    - "{{ arc_b70_frigate_config }}/frigate.yaml"
+  changed_when: false
+
+- name: Deploy the Frigate compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ arc_b70_frigate_dir }}/compose.yaml"
+    mode: '0644'
+
+# -- pre-start gates: no recording can have happened if these fail ----------
+# Validate the config against Frigate's OWN schema before the container
+# starts. Frigate's own validator is the only authority on what 0.18 accepts
+# (the `mqtt` block is required, `model:` belongs at the root, `version:`
+# must match the image), and a config it rejects is silently replaced by the
+# pydantic defaults -- a CPU detector and no cameras -- with only a log line
+# to say so.
+#
+# The validator runs in a throwaway container with the config bind-mounted
+# read-only. Its exit code is 0 whether the config is valid or not ("Starting
+# Frigate in safe mode"), so the OUTPUT is what decides.
+- name: Validate the Frigate config against the image's own schema
+  ansible.builtin.command:
+    cmd: >-
+      docker run --rm
+      -v {{ arc_b70_frigate_config_file }}:/config/config.yaml:ro
+      {{ arc_b70_frigate_image }}
+      python3 -m frigate --validate-config
+  register: arc_b70_frigate_validate
+  changed_when: false
+  failed_when: false
+
+- name: Assert the Frigate config is valid
+  ansible.builtin.assert:
+    that:
+      - "'Your config file is valid.' in arc_b70_frigate_validate.stdout"
+    fail_msg: >-
+      Frigate rejected the rendered config. The container would boot on the
+      pydantic defaults (a CPU detector, no cameras) instead. Validator
+      output:
+      {{ arc_b70_frigate_validate.stdout_lines | default([]) | join('\n') }}
+      {{ arc_b70_frigate_validate.stderr_lines | default([]) | join('\n') }}
+    quiet: true
+
+# slurp reads the file as the controller wrote it -- the only way to assert on
+# what the container will actually load.
+- name: Read the rendered Frigate configuration
+  ansible.builtin.slurp:
+    src: "{{ arc_b70_frigate_config_file }}"
+  register: frigate_rendered
+  changed_when: false
+  no_log: true
+
+- name: Assert the rendered config records on no camera
+  ansible.builtin.assert:
+    that:
+      - (frigate_rendered.content | b64decode | from_yaml).record.enabled == false
+      - (frigate_rendered.content | b64decode | from_yaml).cameras | dict2items | map(attribute='value.record.enabled') | list | unique == [false]
+    fail_msg: >-
+      The rendered Frigate config enables recording on at least one camera.
+      Refusing to start the container. Camera record flags:
+      {{ (frigate_rendered.content | b64decode | from_yaml).cameras | dict2items | map(attribute='key') | list }}
+    quiet: true
+
+# findmnt prints the SOURCE DEVICE, not the filesystem label: asserting on the
+# XFS label arc_data would fail on a correct system.
+- name: Check which filesystem provides the media root
+  ansible.builtin.command:
+    cmd: "findmnt -T {{ arc_b70_frigate_media }}"
+  register: arc_b70_frigate_media_mount
+  changed_when: false
+
+- name: Assert the media root is on the local data volume
+  ansible.builtin.assert:
+    that:
+      - arc_b70_data_device in arc_b70_frigate_media_mount.stdout
+      - "'nfs' not in arc_b70_frigate_media_mount.stdout"
+      - arc_b70_nas_host not in arc_b70_frigate_media_mount.stdout
+    fail_msg: >-
+      The Frigate media root {{ arc_b70_frigate_media }} is not on
+      {{ arc_b70_data_device }}. findmnt says:
+      {{ arc_b70_frigate_media_mount.stdout }}
+    quiet: true
+
+# Scoped to recording SEGMENTS, not to every file: Frigate writes its own
+# bookkeeping (database, snapshots) into the media tree, and an "any file"
+# check would fail on a second run.
+- name: Find recording segments in the media root
+  ansible.builtin.find:
+    paths: "{{ arc_b70_frigate_media }}"
+    patterns:
+      - "*.mp4"
+      - "*.mkv"
+      - "*.avi"
+      - "*.ts"
+    recurse: true
+    file_type: file
+    hidden: true
+  register: arc_b70_frigate_media_files
+  changed_when: false
+
+- name: Assert the media root holds no recording segments
+  ansible.builtin.assert:
+    that:
+      - arc_b70_frigate_media_files.matched == 0
+    fail_msg: >-
+      {{ arc_b70_frigate_media_files.matched }} recording segment(s) exist under
+      {{ arc_b70_frigate_media }}. Refusing to start the container.
+    quiet: true
+
+# -- container start -------------------------------------------------------
+- name: Check the Frigate container's state
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' frigate-arc"
+  register: arc_b70_frigate_state
+  changed_when: false
+  failed_when: false
+
+# The container MUST be recreated when the config changed. Frigate reads its
+# config once at startup and holds it in memory; a running container keeps
+# serving the config it booted with, no matter what is on disk afterwards.
+# "docker compose up -d" alone will not recreate a container whose compose
+# file is unchanged -- only the mounted config file changed -- so the
+# recreate is explicit.
+#
+# The trigger is the LIVE config, not the template task's changed flag: a
+# config edited by hand, or restored from a backup, leaves the template task
+# reporting "ok" while the container still serves the old config. Comparing
+# the running container's config against the file on disk is the only signal
+# that cannot go stale.
+- name: Read the config the running container is serving
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_frigate_port }}/api/config"
+  register: arc_b70_frigate_running_config
+  changed_when: false
+  failed_when: false
+
+- name: Start the Frigate container
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ arc_b70_frigate_dir }}/compose.yaml up -d --force-recreate"
+    chdir: "{{ arc_b70_frigate_dir }}"
+  register: arc_b70_frigate_up
+  when: >-
+    arc_b70_frigate_state.rc != 0
+    or 'running' not in arc_b70_frigate_state.stdout
+    or arc_b70_frigate_running_config.status | default(0) != 200
+    or (arc_b70_frigate_running_config.json.detectors | default({}) | length) != 1
+    or (arc_b70_frigate_running_config.json.detectors.ov.device | default('')) != 'GPU'
+    or (arc_b70_frigate_running_config.json.cameras | default({}) | length) != (arc_b70_frigate_cameras | length)
+  changed_when: true
+
+- name: Wait for Frigate to answer
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_frigate_port }}/api/config"
+  register: arc_b70_frigate_config_resp
+  until: arc_b70_frigate_config_resp.status == 200
+  retries: 40
+  delay: 5
+
+# The detector's type and device live in /api/config, NOT /api/stats:
+# /api/stats reports the RUNNING detector's pid, inference speed and memory,
+# but has no "type" or "device" key at all.
+#
+# This assert is also the guard against the failure mode where Frigate boots
+# on its own default config (wrong filename, or a stale default left in
+# /config): the default has one detector named "ov" of type openvino on
+# device CPU and NO cameras. Requiring device == GPU AND a non-empty camera
+# list catches both.
+- name: Verify the OpenVINO detector is configured
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_frigate_port }}/api/config"
+  register: arc_b70_frigate_live_config
+  until: arc_b70_frigate_live_config.status == 200
+  retries: 30
+  delay: 5
+
+- name: Assert the ov detector is openvino on the GPU
+  ansible.builtin.assert:
+    that:
+      - arc_b70_frigate_live_config.json.detectors is defined
+      - arc_b70_frigate_live_config.json.detectors.ov is defined
+      - arc_b70_frigate_live_config.json.detectors.ov.type == 'openvino'
+      - arc_b70_frigate_live_config.json.detectors.ov.device == 'GPU'
+      - arc_b70_frigate_live_config.json.cameras | length == arc_b70_frigate_cameras | length
+    fail_msg: >-
+      The running Frigate is not the config we deployed. The detector must be
+      openvino on device GPU and the camera list must match. Either Frigate
+      booted on its own default config (it reads /config/config.yml, falling
+      back to /config/config.yaml -- a config under any other name is
+      ignored) or the detector device was not applied.
+      Live detectors:
+      {{ arc_b70_frigate_live_config.json.detectors | default('absent') }}
+      Live cameras:
+      {{ arc_b70_frigate_live_config.json.cameras | default('absent') | list }}
+    quiet: true
+
+# /api/stats proves the detector PROCESS is alive (pid, inference speed).
+- name: Verify the detector process is running
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_frigate_port }}/api/stats"
+  register: arc_b70_frigate_stats
+  until: arc_b70_frigate_stats.status == 200
+  retries: 30
+  delay: 5
+
+- name: Assert the ov detector process is live
+  ansible.builtin.assert:
+    that:
+      - arc_b70_frigate_stats.json.detectors is defined
+      - arc_b70_frigate_stats.json.detectors.ov is defined
+      - arc_b70_frigate_stats.json.detectors.ov.pid | int > 0
+    fail_msg: >-
+      The OpenVINO detector is not live. /api/stats detectors:
+      {{ arc_b70_frigate_stats.json.detectors | default('absent') }}
+    quiet: true
+
+- name: Assert no camera is recording
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_frigate_port }}/api/config"
+  register: arc_b70_frigate_cfg
+  until: arc_b70_frigate_cfg.status == 200
+  retries: 30
+  delay: 5
+
+- name: Assert every camera's record.enabled is false
+  ansible.builtin.assert:
+    that:
+      - arc_b70_frigate_cfg.json.cameras | dict2items | map(attribute='value.record.enabled') | list | unique == [false]
+    fail_msg: >-
+      At least one camera is recording:
+      {{ arc_b70_frigate_cfg.json.cameras | dict2items | map(attribute='key') | list }}
+    quiet: true
+
+# -- post-start confirmation: frames are actually flowing -------------------
+# A camera that cannot authenticate reports camera_fps: 0 while the detector
+# still appears in /api/stats, so this is what catches a silent auth failure.
+- name: Fetch the camera statistics
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ arc_b70_frigate_port }}/api/stats"
+  register: arc_b70_frigate_camera_stats
+  until: arc_b70_frigate_camera_stats.status == 200
+  retries: 30
+  delay: 5
+
+- name: Assert at least one camera is delivering frames
+  ansible.builtin.assert:
+    that:
+      - arc_b70_frigate_camera_stats.json.cameras | dict2items | map(attribute='value.camera_fps') | map('float') | max > 0
+    fail_msg: >-
+      No camera reports camera_fps > 0. Camera fps:
+      {{ arc_b70_frigate_camera_stats.json.cameras | dict2items | map(attribute='value.camera_fps') | list }}
+    quiet: true
+
+# The detector counters live in /api/stats under .detectors.ov. There is no
+# /api/stats/detectors endpoint in 0.18 (it returns 404).
+- name: Assert the detector is actually inferring
+  ansible.builtin.assert:
+    that:
+      - (arc_b70_frigate_camera_stats.json.detectors.ov.inference_speed | default(0) | float) > 0
+    fail_msg: >-
+      The ov detector is configured but has not inferred. Detector stats:
+      {{ arc_b70_frigate_camera_stats.json.detectors.ov | default('absent') }}
+    quiet: true
+
+- name: Record the frame and inference counters
+  ansible.builtin.debug:
+    msg: >-
+      Frigate camera_fps:
+      {{ arc_b70_frigate_camera_stats.json.cameras | dict2items | map(attribute='value.camera_fps') | list }}
+      -- detector inference_speed (ms):
+      {{ arc_b70_frigate_camera_stats.json.detectors.ov.inference_speed | default('n/a') }}

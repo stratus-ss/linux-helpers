@@ -1,0 +1,22 @@
+services:
+  frigate:
+    container_name: frigate-arc
+    image: {{ arc_b70_frigate_image }}
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "{{ arc_b70_render_gid }}"
+    volumes:
+      - {{ arc_b70_frigate_config }}:/config
+      - {{ arc_b70_frigate_storage }}:/storage
+      - {{ arc_b70_frigate_media }}:/media/frigate
+    ports:
+      - "127.0.0.1:{{ arc_b70_frigate_port }}:5000"
+    shm_size: "512mb"
+    restart: unless-stopped
+
+  # The production config feeds 3 of its 10 cameras from a go2rtc restream
+  # (rtsp://127.0.0.1:8554/NAME). That restream is produced by Frigate's
+  # built-in go2rtc inside the Frigate container's network namespace, so no
+  # separate sidecar is needed: the go2rtc: block in frigate.yaml declares the
+  # 5 source streams and the restreams resolve locally.

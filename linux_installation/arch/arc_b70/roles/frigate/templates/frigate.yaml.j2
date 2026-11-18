@@ -1,0 +1,81 @@
+# Frigate on Intel Arc Pro B70 -- detection only.
+#
+# The config version MUST be present and MUST match the image's
+# CURRENT_CONFIG_VERSION (frigate/util/config.py). Without it Frigate assumes
+# "0.13" and runs the whole migration chain, which REWRITES the file and
+# drops the detectors block -- the container then boots on the pydantic
+# default (a CPU detector, no cameras) with no error.
+version: 0.18-0
+
+# mqtt is a REQUIRED field in 0.18 -- it has no default, and a missing one
+# makes the whole config fail validation with "Field required" at the mqtt
+# key. MQTT is not wanted here; the block only has to exist.
+mqtt:
+  enabled: false
+
+# hwaccel_args is preset-vaapi, NOT preset-intel-qsv-h264: the xe driver breaks
+# QSV on Battlemage. VAAPI selects the profile automatically and works for both
+# H.264 and H.265.
+ffmpeg:
+  hwaccel_args: preset-vaapi
+
+# Frigate 0.18's schema:
+#   - `device` lives under the detector.
+#   - `model:` lives at the ROOT of the config. A nested `model:` under a
+#     detector is explicitly ignored by the config validator ("The model key
+#     should be specified at the root level of the config"), which silently
+#     leaves the detector on its default device.
+detectors:
+  ov:
+    type: openvino
+    device: GPU
+
+# The model the IMAGE ships. Frigate's own default openvino config
+# (frigate/config/config.py DEFAULT_MODEL) points at exactly these paths, and
+# the Dockerfile builds them into /openvino-model/ at image build time
+# (docker/main/build_ov_model.py). Nothing is downloaded at run time and no
+# model URL can rot.
+#
+# The key is "path", NOT "model_path".
+model:
+  path: /openvino-model/ssdlite_mobilenet_v2.xml
+  labelmap_path: /openvino-model/coco_91cl_bkgr.txt
+  # SSDLite MobileNet v2 native input: 300x300, NHWC, BGR.
+  width: 300
+  height: 300
+  input_tensor: nhwc
+  input_pixel_format: bgr
+  model_type: ssd
+
+detect:
+  enabled: true
+
+# No recording anywhere. The operator's constraint is enforced here and
+# asserted before the container starts.
+record:
+  enabled: false
+
+go2rtc:
+  streams:
+{% for name, stream in arc_b70_frigate_go2rtc_streams.items() %}
+    {{ name }}:
+      - ffmpeg:{{ stream | replace('CHANGE_ME', arc_b70_frigate_rtsp_password) }}
+{% endfor %}
+
+cameras:
+{% for name, cam in arc_b70_frigate_cameras.items() %}
+  {{ name }}:
+    ffmpeg:
+      inputs:
+{% for input in cam.inputs %}
+        - path: {{ input.path | replace('CHANGE_ME', arc_b70_frigate_rtsp_password) }}
+          roles:
+{% for role in input.roles %}
+            - {{ role }}
+{% endfor %}
+{% endfor %}
+    detect:
+      enabled: {{ cam.detect_enabled | default(true) }}
+    record:
+      enabled: false
+{% endfor %}
