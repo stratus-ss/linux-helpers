@@ -1,13 +1,17 @@
 # ComfyUI as a container.
 #
-# The shape (devices + group_add + 127.0.0.1 port prefix) is the one already
-# running on this host for frigate, whisper-webui and ebook2audiobook -- not a
-# new variant.
+# The shape (devices + group_add + the bind-address port prefix) is the one
+# already running on this host for frigate, whisper-webui and
+# ebook2audiobook -- not a new variant.
 #
 # --listen 0.0.0.0 INSIDE the container is correct and must not be "fixed" to
-# 127.0.0.1: the host side of the port mapping below is what enforces
-# loopback-only. Binding 127.0.0.1 inside the container's own network namespace
+# 127.0.0.1: the host side of the port mapping below is what controls who can
+# reach it. Binding 127.0.0.1 inside the container's own network namespace
 # would make the port unreachable through the mapping.
+#
+# arc_b70_bind_address is 0.0.0.0 as of 2026-11-18 (LAN-reachable); set it to
+# 127.0.0.1 in group_vars to restore loopback-only. ComfyUI has no
+# authentication either way.
 #
 # restart: "no" is mandatory (DR-4). The role starts this container so it can
 # prove the XPU works, then stops it. "unless-stopped" would fight both that
@@ -37,7 +41,7 @@ services:
       - {{ arc_b70_comfyui_dir }}/input:/opt/comfyui/input
       - {{ arc_b70_comfyui_dir }}/user:/opt/comfyui/user
     ports:
-      - "127.0.0.1:{{ arc_b70_comfyui_port }}:8188"
+      - "{{ arc_b70_bind_address }}:{{ arc_b70_comfyui_port }}:8188"
     # ComfyUI is multi-threaded and its workers share memory; docker's 64 MB
     # default /dev/shm is small enough to crash a render rather than fail it
     # cleanly.

@@ -11,7 +11,7 @@ services:
       - {{ arc_b70_frigate_storage }}:/storage
       - {{ arc_b70_frigate_media }}:/media/frigate
     ports:
-      - "127.0.0.1:{{ arc_b70_frigate_port }}:5000"
+      - "{{ arc_b70_bind_address }}:{{ arc_b70_frigate_port }}:5000"
     shm_size: "512mb"
     restart: unless-stopped
 

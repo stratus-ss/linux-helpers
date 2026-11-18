@@ -13,7 +13,7 @@ services:
       - {{ arc_b70_whisper_outputs }}:/Whisper-WebUI-Swear-Removal/outputs
       - {{ arc_b70_whisper_configs }}:/Whisper-WebUI-Swear-Removal/configs
     ports:
-      - "127.0.0.1:{{ arc_b70_whisper_port }}:7860"
+      - "{{ arc_b70_bind_address }}:{{ arc_b70_whisper_port }}:7860"
     stdin_open: true
     tty: true
     # The server binds 0.0.0.0 inside the container's own network namespace;

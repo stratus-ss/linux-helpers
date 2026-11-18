@@ -93,6 +93,15 @@ arc_b70_comfyui_version: "v0.32.0"
 arc_b70_comfyui_models_dir: "{{ arc_b70_comfyui_dir }}/models"
 arc_b70_comfyui_port: 8188
 
+# Host address every published port is bound to.
+#
+# 0.0.0.0 (LAN-reachable) as of 2026-11-18 on operator direction: none of these
+# services carry authentication, so loopback-only meant the only way to test
+# them was an SSH tunnel. Set this back to 127.0.0.1 to restore loopback-only;
+# the container side is unaffected either way (it always binds 0.0.0.0 inside
+# its own namespace, or the published port could not reach it).
+arc_b70_bind_address: "0.0.0.0"
+
 # -- Fish S2-Pro (Task 8) ----------------------------------------------------
 arc_b70_fish_repo: https://github.com/fishaudio/fish-speech.git
 arc_b70_fish_commit: "214da3cd841bda85da2496b96cd3c4d7edb1337e"

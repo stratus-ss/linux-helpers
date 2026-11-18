@@ -155,12 +155,22 @@
       {{ arc_b70_frigate_media_mount.stdout }}
     quiet: true
 
-# Scoped to recording SEGMENTS, not to every file: Frigate writes its own
-# bookkeeping (database, snapshots) into the media tree, and an "any file"
-# check would fail on a second run.
+# Scoped to the recordings/ SUBTREE, not to the media root. Two separate traps
+# live here:
+#
+#   * Frigate writes its own bookkeeping (database, snapshots) into the media
+#     tree, so an "any file" check would fail on a second run;
+#   * since 0.18 it also writes clips/thumbnails and clips/previews as ONE-MINUTE
+#     mp4 segments, on a timer, for detections -- even with record disabled on
+#     every camera. A *.mp4 search from the media root therefore matches its own
+#     previews and the assertion fails on a host that simply has been up for a
+#     while. Measured 2026-11-18: 10 files, all under clips/, recordings/ empty.
+#
+# The operator constraint is "no RECORDINGS", and that is exactly what
+# recordings/ contains.
 - name: Find recording segments in the media root
   ansible.builtin.find:
-    paths: "{{ arc_b70_frigate_media }}"
+    paths: "{{ arc_b70_frigate_media }}/recordings"
     patterns:
       - "*.mp4"
       - "*.mkv"
@@ -178,7 +188,7 @@
       - arc_b70_frigate_media_files.matched == 0
     fail_msg: >-
       {{ arc_b70_frigate_media_files.matched }} recording segment(s) exist under
-      {{ arc_b70_frigate_media }}. Refusing to start the container.
+      {{ arc_b70_frigate_media }}/recordings. Refusing to start the container.
     quiet: true
 
 # -- container start -------------------------------------------------------

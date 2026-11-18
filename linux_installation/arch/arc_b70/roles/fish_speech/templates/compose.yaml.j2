@@ -5,9 +5,13 @@
 # differs between them is only the command and one argument.
 #
 # --listen 0.0.0.0 INSIDE the container is correct and must not be "fixed" to
-# 127.0.0.1: the host side of each port mapping below is what enforces
-# loopback-only. Binding 127.0.0.1 inside the container's own network namespace
+# 127.0.0.1: the host side of each port mapping below is what controls who can
+# reach it. Binding 127.0.0.1 inside the container's own network namespace
 # would make the ports unreachable through the mapping.
+#
+# arc_b70_bind_address is 0.0.0.0 as of 2026-11-18 (LAN-reachable); set it to
+# 127.0.0.1 in group_vars to restore loopback-only. Neither the api_server nor
+# the WebUI has authentication.
 #
 # restart: "no" on both (DR-4) -- the roles start these to prove them and then
 # stop them, and the b70q queue requires the card free between runs.
@@ -37,7 +41,7 @@ services:
       - {{ arc_b70_fishtts_out }}:/opt/fish/out
       - {{ arc_b70_fish_hf_cache }}:/opt/hf-cache
     ports:
-      - "127.0.0.1:{{ arc_b70_fishtts_api_port }}:8080"
+      - "{{ arc_b70_bind_address }}:{{ arc_b70_fishtts_api_port }}:8080"
     shm_size: "2gb"
     restart: "no"
     command:
@@ -74,7 +78,7 @@ services:
       - {{ arc_b70_fishtts_out }}:/opt/fish/out
       - {{ arc_b70_fish_hf_cache }}:/opt/hf-cache
     ports:
-      - "127.0.0.1:{{ arc_b70_fishtts_webui_port }}:7861"
+      - "{{ arc_b70_bind_address }}:{{ arc_b70_fishtts_webui_port }}:7861"
     shm_size: "2gb"
     restart: "no"
     # depends_on orders START ONLY, not readiness: the api_server takes ~6

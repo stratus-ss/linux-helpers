@@ -24,5 +24,5 @@ services:
       - {{ arc_b70_e2a_voices }}:/app/voices
       - {{ arc_b70_e2a_tmp }}:/app/tmp
     ports:
-      - "127.0.0.1:{{ arc_b70_e2a_port }}:7860"
+      - "{{ arc_b70_bind_address }}:{{ arc_b70_e2a_port }}:7860"
     restart: unless-stopped
