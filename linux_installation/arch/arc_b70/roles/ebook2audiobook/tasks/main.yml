@@ -104,6 +104,21 @@
     dest: "{{ arc_b70_e2a_build_context }}/Dockerfile.arc_b70"
     mode: '0644'
 
+# sitecustomize.py disables torchaudio's sox backend, which SEGFAULTS on this
+# image inside the torch C++ dispatcher. The crash is silent -- no traceback
+# reaches the log -- and it lands in the middle of every XTTS conversion, in
+# coqui-tts' load_audio(), when the voice is cloned from its reference
+# waveform. The app then looks like it hung rather than crashed.
+#
+# Python imports sitecustomize automatically at interpreter start, so it has to
+# be a real file in site-packages rather than something the app calls. It is
+# staged into the build context because the Dockerfile COPYs it from there.
+- name: Deploy the torchaudio sox backend workaround
+  ansible.builtin.template:
+    src: sitecustomize.py
+    dest: "{{ arc_b70_e2a_build_context }}/sitecustomize.py"
+    mode: '0644'
+
 # The recipe is identified by the checksum of the files that determine it
 # (the patched Dockerfile) plus the build arguments that steer the build
 # (the device string and the index URL). The checksum is written into the
@@ -120,6 +135,14 @@
     checksum_algorithm: sha256
   register: arc_b70_e2a_recipe_files
 
+# sitecustomize.py is part of the recipe too: it is COPYed into the image, so
+# a change to it has to change the checksum or the image would be left stale.
+- name: Compute the sox workaround checksum
+  ansible.builtin.stat:
+    path: "{{ arc_b70_e2a_build_context }}/sitecustomize.py"
+    checksum_algorithm: sha256
+  register: arc_b70_e2a_sox_fix_files
+
 - name: Record the build recipe checksum
   ansible.builtin.set_fact:
     # The recipe is hashed, not concatenated: the device string contains
@@ -129,6 +152,7 @@
     # through verbatim, quotes and all.
     arc_b70_e2a_recipe: >-
       {{ (arc_b70_e2a_recipe_files.stat.checksum
+          ~ arc_b70_e2a_sox_fix_files.stat.checksum
           ~ arc_b70_e2a_device_str
           ~ arc_b70_e2a_base_index_url
           ~ arc_b70_e2a_index_url
@@ -257,3 +281,64 @@
 - name: Record the torch version
   ansible.builtin.debug:
     msg: "{{ arc_b70_e2a_torch.stdout_lines | default([]) | join(' | ') }}"
+
+# The dependency pins are what keep the XTTS engine importable. If a rebuild
+# resolves them differently the engine dies with
+#
+#   ImportError: cannot import name 'isin_mps_friendly' from 'transformers.pytorch_utils'
+#
+# which happens MID-CONVERSION: the UI is up, the ebook is parsed, and then
+# the TTS engine fails to load. Asserting here means a bad image is caught at
+# deploy time instead of by the next user who picks a file.
+- name: Assert the XTTS dependency pins are in effect
+  ansible.builtin.command:
+    cmd: >-
+      docker exec ebook2audiobook python3 -c
+      "import importlib.metadata as md;
+      from packaging.version import Version;
+      t=md.version('transformers'); h=md.version('huggingface-hub');
+      p=md.version('pyannote-audio');
+      print('transformers', t); print('hub', h); print('pyannote', p);
+      assert Version(t) < Version('5'), t;
+      assert Version(h) < Version('1.0'), h;
+      assert p == '3.4.0', p;
+      import transformers.pytorch_utils as pu;
+      assert hasattr(pu, 'isin_mps_friendly'), 'isin_mps_friendly missing';
+      print('PINS OK')"
+  register: arc_b70_e2a_pins
+  changed_when: false
+  failed_when: "'PINS OK' not in arc_b70_e2a_pins.stdout"
+
+- name: Record the dependency pins
+  ansible.builtin.debug:
+    msg: "{{ arc_b70_e2a_pins.stdout_lines | default([]) | join(' | ') }}"
+
+# torchaudio's sox backend SEGFAULTS on this image, silently, inside the torch
+# C++ dispatcher. The app's XTTS path hits it on every book when the voice is
+# cloned from its reference waveform, so without this check a conversion dies
+# mid-run with no traceback in the log and the UI just stops.
+#
+# sitecustomize.py removes sox from torchaudio.load's backend map. Assert that
+# it is gone AND that loading a real WAV still works, because the patch is
+# only useful if soundfile takes over cleanly.
+- name: Assert the torchaudio sox backend is disabled and audio still loads
+  ansible.builtin.command:
+    cmd: >-
+      docker exec ebook2audiobook python3 -c
+      "import torchaudio, numpy as np, soundfile as sf;
+      d = torchaudio.load.__closure__[0].cell_contents;
+      b = d.__closure__[0].cell_contents;
+      print('backends', list(b));
+      assert 'sox' not in b, b;
+      buf = sf.write('/tmp/soxcheck.wav', np.zeros(2400, dtype='float32'), 24000);
+      w, sr = torchaudio.load('/tmp/soxcheck.wav');
+      print('loaded', tuple(w.shape), sr);
+      assert sr == 24000, sr;
+      print('SOX OK')"
+  register: arc_b70_e2a_sox
+  changed_when: false
+  failed_when: "'SOX OK' not in arc_b70_e2a_sox.stdout"
+
+- name: Record the torchaudio backend state
+  ansible.builtin.debug:
+    msg: "{{ arc_b70_e2a_sox.stdout_lines | default([]) | join(' | ') }}"

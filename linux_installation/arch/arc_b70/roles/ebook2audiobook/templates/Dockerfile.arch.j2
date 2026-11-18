@@ -90,15 +90,114 @@ RUN pip install --no-cache-dir \
 
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
+# ---------------------------------------------------------------------------
+# THE PIN SET. This is not a preference; the dependency tree has two
+# mutually exclusive branches and the requirements resolve picks the wrong one
+# for a non-CUDA build.
+#
+# Upstream's own device_installer.py documents the split:
+#
+#   torch >= 2.9 -> torchcodec exists -> pyannote 4 -> hub 1.x -> transformers 5
+#   torch <  2.9 -> no torchcodec     -> pyannote 3.4.0 -> hub <1.0 -> transformers 4.57.6
+#
+# With torch 2.15 the resolve lands on the top branch: transformers 5.x, which
+# REMOVED isin_mps_friendly from transformers.pytorch_utils. coqui-tts 0.27.5
+# imports that symbol (TTS/tts/layers/tortoise/autoregressive.py), so the XTTS
+# engine dies at load:
+#
+#   ImportError: cannot import name 'isin_mps_friendly' from 'transformers.pytorch_utils'
+#
+# The UI still starts and the ebook is still parsed, so the failure presents as
+# "it processed for a little while then stopped" rather than as a crash.
+#
+# torch 2.8.0+xpu is the newest XPU wheel below the 2.9 boundary, and it takes
+# the bottom branch, which is intact:
+#
+#   transformers 4.57.6   -> still exports isin_mps_friendly
+#   huggingface-hub 0.36.2 -> the <1.0 cap pyannote 3.4.0 needs
+#   pyannote-audio 3.4.0   -> the last release before torchcodec
+#   torchcodec             -> not installed, and not needed below torch 2.9
+#
+# pyannote-audio 3.4.0 pulls torch 2.15 from PyPI (the CUDA build) on the way
+# in, so the XPU torch has to be reinstalled AFTER it. Order matters here:
+# install the pins, then reinstall the XPU torch over the top.
+RUN pip install --no-cache-dir \
+      "transformers==4.57.6" \
+      "huggingface-hub>=0.36.2,<1.0" \
+      "pyannote-audio==3.4.0" \
+ && pip install --no-cache-dir --index-url {{ arc_b70_e2a_index_url }} \
+      "torch==2.8.0+xpu" "torchaudio==2.8.0+xpu" "pytorch-triton-xpu==3.4.0"
+
 # Then prove nothing later in the resolve replaced them, and drop anything a
 # dependency still managed to drag in. The assertion is what makes a silently
 # CPU-only image impossible: it fails the build instead.
+#
+# pyannote-audio 3.4.0 brings the whole CUDA stack with it (nvidia-cublas,
+# cuda-toolkit, nvidia-cudnn-cu13, nvidia-nccl-cu13, ...). Those have to go,
+# or torch ends up linking against the CUDA runtime on an Intel card. The
+# pytorch-triton-xpu uninstall is deliberate too: the torch 2.15 resolve
+# replaced it with the CUDA triton, and torch 2.8 needs the XPU build.
 RUN set -eux; \
     pip list --format=freeze > /tmp/pkgs.txt; \
-    grep -iE '^(nvidia-|cuda-|triton==)' /tmp/pkgs.txt | cut -d= -f1 > /tmp/gone.txt || true; \
+    grep -iE '^(nvidia-|cuda-|triton==|pytorch-triton-xpu$)' /tmp/pkgs.txt | cut -d= -f1 > /tmp/gone.txt || true; \
     if [ -s /tmp/gone.txt ]; then pip uninstall -y -r /tmp/gone.txt || true; fi; \
     rm -f /tmp/pkgs.txt /tmp/gone.txt; \
+    pip install --no-cache-dir --index-url {{ arc_b70_e2a_index_url }} \
+      "torch==2.8.0+xpu" "torchaudio==2.8.0+xpu" "pytorch-triton-xpu==3.4.0"; \
     python -c "import torch; v=torch.__version__; assert '+xpu' in v, v; assert torch.version.cuda is None, torch.version.cuda; print('FINAL-TORCH', v)"
+
+# The dependency pins have teeth only if they are actually in effect. A
+# resolved-but-unused transformers 5 would still break the engine, and a
+# missing torchcodec would only surface at runtime. Assert the exact set.
+RUN set -eux; \
+    python -c "\
+import importlib.metadata as md; \
+from packaging.version import Version; \
+assert Version(md.version('transformers')) < Version('5'), md.version('transformers'); \
+assert Version(md.version('huggingface-hub')) < Version('1.0'), md.version('huggingface-hub'); \
+assert md.version('pyannote-audio') == '3.4.0', md.version('pyannote-audio'); \
+assert md.version('coqui-tts') == '0.27.5', md.version('coqui-tts'); \
+import transformers.pytorch_utils as pu; \
+assert hasattr(pu, 'isin_mps_friendly'), 'transformers no longer exports isin_mps_friendly'; \
+print('PINS OK', md.version('transformers'), md.version('huggingface-hub'))"
+
+# ---------------------------------------------------------------------------
+# THE SOX BACKEND IS DEAD ON THIS IMAGE.
+#
+# torchaudio 2.8's sox backend SEGFAULTS inside the torch C++ dispatcher:
+#
+#   Fatal Python error: Segmentation fault
+#     File "torch/_ops.py", line 1243 in __call__
+#     File "torchaudio/_backend/sox.py", line 44 in load
+#
+# It is not an exception, so nothing reaches the log and the process just dies
+# mid-conversion. The sox CLI reads the same file without complaint and
+# soundfile reads it too, so this is the torchaudio C++ extension against
+# Arch's sox-ng 14.8 -- not a bad file and not a missing library.
+#
+# coqui-tts' load_audio() calls torchaudio.load() on the reference waveform to
+# clone a voice, so XTTS hits it on every book: the voice clone crashes the
+# whole conversion, silently, after the UI has already started work.
+#
+# torchaudio.load picks a backend through a dispatcher that holds the backend
+# map in a CLOSURE CELL captured at import time. Replacing the module attribute
+# get_available_backends does nothing to it -- the cell has to be written
+# directly, which is what sitecustomize.py does. Python imports sitecustomize
+# automatically at interpreter start, so this applies to every process in the
+# image, including the ones the app spawns.
+#
+# Removing sox leaves soundfile, which handles everything this app loads.
+COPY sitecustomize.py /opt/venv/lib/python3.12/site-packages/sitecustomize.py
+
+# Prove the patch is actually in effect and that loading a real WAV works.
+# This is the check that would have caught the silent segfault.
+RUN set -eux; \
+    python -c "\
+import torchaudio; \
+d = torchaudio.load.__closure__[0].cell_contents; \
+b = d.__closure__[0].cell_contents; \
+assert 'sox' not in b, b; \
+print('SOX BACKEND REMOVED', list(b))"
 
 # Upstream's own directory layout -- the app reads and writes these paths.
 RUN mkdir -p /app/ebooks /app/audiobooks /app/models /app/voices /app/tmp /app/run
