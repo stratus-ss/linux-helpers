@@ -60,8 +60,19 @@
 # The checkout is dirty by design: the role writes its own Dockerfile into it
 # (Dockerfile.arc_b70, an untracked file). ansible.builtin.git cannot reconcile
 # a dirty checkout -- it fails on a modified TRACKED file -- so the clone is
-# guarded on the pinned SHA instead. The checkout is never re-cloned or reset,
-# so the role's file survives.
+# guarded on the pinned SHA instead.
+#
+# A PIN CHANGE is a different case: the checkout has to move to the new
+# commit, and git will not do that while the tree is dirty. The tracked-file
+# modifications are always leftovers (the role used to patch upstream's
+# Dockerfile in place, and upstream's own installer rewrites it), never
+# anything the role needs -- the role's own files are UNTRACKED and survive a
+# checkout untouched.
+#
+# So when the pin changes: discard the tracked-file modifications and remove
+# the untracked files the role used to stage, then let git move to the new
+# commit. The build context is disposable by construction: it is a checkout
+# plus the role's own Dockerfile, and both are recreated below.
 - name: Read the pinned commit of the existing checkout
   ansible.builtin.command:
     cmd: "git rev-parse HEAD"
@@ -70,13 +81,37 @@
   changed_when: false
   failed_when: false
 
+# The role's own build files must not be deleted by the cleanup below: they
+# are untracked, and so is everything else git would remove. They are
+# recreated by the template tasks right after, so deleting them is safe.
+#
+# Only the TRACKED files are restored, and only the known stale untracked
+# files are removed. A blanket `git clean -fdx` would empty the checkout,
+# and ansible.builtin.git cannot be relied on to re-clone into a directory
+# that still holds a .git but no worktree files.
+- name: Discard local modifications so the checkout can move to a new commit
+  ansible.builtin.command:
+    cmd: "git checkout -- ."
+    chdir: "{{ arc_b70_e2a_build_context }}"
+  when: arc_b70_e2a_head.rc == 0 and arc_b70_e2a_head.stdout | trim != arc_b70_e2a_commit
+  changed_when: true
+
+# sitecustomize.py at the checkout root was the role's own copy, back when the
+# role carried the torchaudio workaround. Upstream ships its own under
+# components/, so the root copy is stale and would otherwise sit in the build
+# context doing nothing.
+- name: Remove the superseded root sitecustomize.py
+  ansible.builtin.file:
+    path: "{{ arc_b70_e2a_build_context }}/sitecustomize.py"
+    state: absent
+
 - name: Clone the upstream source at the pinned commit
   ansible.builtin.git:
     repo: "{{ arc_b70_e2a_source }}"
     dest: "{{ arc_b70_e2a_build_context }}"
     version: "{{ arc_b70_e2a_commit }}"
     depth: 1
-    force: false
+    force: true
   when: arc_b70_e2a_head.rc != 0 or arc_b70_e2a_head.stdout | trim != arc_b70_e2a_commit
 
 # The image recipe is a file the role owns, NOT a patch applied to upstream's
@@ -104,20 +139,16 @@
     dest: "{{ arc_b70_e2a_build_context }}/Dockerfile.arc_b70"
     mode: '0644'
 
-# sitecustomize.py disables torchaudio's sox backend, which SEGFAULTS on this
-# image inside the torch C++ dispatcher. The crash is silent -- no traceback
-# reaches the log -- and it lands in the middle of every XTTS conversion, in
-# coqui-tts' load_audio(), when the voice is cloned from its reference
-# waveform. The app then looks like it hung rather than crashed.
+# The sox backend workaround is NOT staged here any more: upstream ships
+# components/sitecustomize.py, which replaces torchaudio.load with a
+# soundfile-backed shim. That is a better fix than the closure-poke this role
+# used to carry (it does not depend on torchaudio's internals), and it keeps
+# the role from maintaining a fork of upstream's own patch.
 #
-# Python imports sitecustomize automatically at interpreter start, so it has to
-# be a real file in site-packages rather than something the app calls. It is
-# staged into the build context because the Dockerfile COPYs it from there.
-- name: Deploy the torchaudio sox backend workaround
-  ansible.builtin.template:
-    src: sitecustomize.py
-    dest: "{{ arc_b70_e2a_build_context }}/sitecustomize.py"
-    mode: '0644'
+# The Dockerfile COPYs it from components/sitecustomize.py in the build
+# context, so the checkout has to contain it -- which it does, being upstream's
+# own tree. The role asserts at deploy time that the shim is actually in
+# effect.
 
 # The recipe is identified by the checksum of the files that determine it
 # (the patched Dockerfile) plus the build arguments that steer the build
@@ -135,14 +166,6 @@
     checksum_algorithm: sha256
   register: arc_b70_e2a_recipe_files
 
-# sitecustomize.py is part of the recipe too: it is COPYed into the image, so
-# a change to it has to change the checksum or the image would be left stale.
-- name: Compute the sox workaround checksum
-  ansible.builtin.stat:
-    path: "{{ arc_b70_e2a_build_context }}/sitecustomize.py"
-    checksum_algorithm: sha256
-  register: arc_b70_e2a_sox_fix_files
-
 - name: Record the build recipe checksum
   ansible.builtin.set_fact:
     # The recipe is hashed, not concatenated: the device string contains
@@ -152,7 +175,6 @@
     # through verbatim, quotes and all.
     arc_b70_e2a_recipe: >-
       {{ (arc_b70_e2a_recipe_files.stat.checksum
-          ~ arc_b70_e2a_sox_fix_files.stat.checksum
           ~ arc_b70_e2a_device_str
           ~ arc_b70_e2a_base_index_url
           ~ arc_b70_e2a_index_url
@@ -297,13 +319,15 @@
       "import importlib.metadata as md;
       from packaging.version import Version;
       t=md.version('transformers'); h=md.version('huggingface-hub');
-      p=md.version('pyannote-audio');
+      p=md.version('pyannote-audio'); c=md.version('coqui-tts');
+      tw=md.version('torch');
       print('transformers', t); print('hub', h); print('pyannote', p);
+      print('coqui-tts', c); print('torch', tw);
       assert Version(t) < Version('5'), t;
       assert Version(h) < Version('1.0'), h;
       assert p == '3.4.0', p;
-      import transformers.pytorch_utils as pu;
-      assert hasattr(pu, 'isin_mps_friendly'), 'isin_mps_friendly missing';
+      assert c == '0.28.0', c;
+      assert Version(tw) < Version('2.9'), tw;
       print('PINS OK')"
   register: arc_b70_e2a_pins
   changed_when: false
@@ -326,11 +350,9 @@
     cmd: >-
       docker exec ebook2audiobook python3 -c
       "import torchaudio, numpy as np, soundfile as sf;
-      d = torchaudio.load.__closure__[0].cell_contents;
-      b = d.__closure__[0].cell_contents;
-      print('backends', list(b));
-      assert 'sox' not in b, b;
-      buf = sf.write('/tmp/soxcheck.wav', np.zeros(2400, dtype='float32'), 24000);
+      print('torchaudio.load:', torchaudio.load.__name__);
+      assert torchaudio.load.__name__ == '_load_via_soundfile', torchaudio.load.__name__;
+      sf.write('/tmp/soxcheck.wav', np.zeros(2400, dtype='float32'), 24000);
       w, sr = torchaudio.load('/tmp/soxcheck.wav');
       print('loaded', tuple(w.shape), sr);
       assert sr == 24000, sr;

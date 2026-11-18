@@ -100,29 +100,44 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 #   torch >= 2.9 -> torchcodec exists -> pyannote 4 -> hub 1.x -> transformers 5
 #   torch <  2.9 -> no torchcodec     -> pyannote 3.4.0 -> hub <1.0 -> transformers 4.57.6
 #
-# With torch 2.15 the resolve lands on the top branch: transformers 5.x, which
-# REMOVED isin_mps_friendly from transformers.pytorch_utils. coqui-tts 0.27.5
-# imports that symbol (TTS/tts/layers/tortoise/autoregressive.py), so the XTTS
-# engine dies at load:
+# THIS IMAGE RUNS THE BOTTOM BRANCH, and it has to, for two independent
+# reasons.
 #
-#   ImportError: cannot import name 'isin_mps_friendly' from 'transformers.pytorch_utils'
+# 1. TORCHCODEC CANNOT LOAD ON AN XPU BUILD. torchcodec's shared objects link
+#    against libnvrtc.so.13, libtorch_cuda.so and libc10_cuda.so. None of
+#    those exist here, and there is no XPU-side source for them:
+#    torchcodec-xpu ships only companion xpu_ops*.so, and torchlib-xpu is a
+#    metapackage with no binaries at all. Upstream's XPU path hard-fails on
+#    exactly this (error_torchcodec_import -> return 1), so torch must stay
+#    below 2.9, where torchcodec is not required at all.
 #
-# The UI still starts and the ebook is still parsed, so the failure presents as
-# "it processed for a little while then stopped" rather than as a crash.
+# 2. PYANNOTE 3.4.0 NEEDS HUB < 1.0. Upstream's comment at
+#    has_torchcodec_stack() claims the torch < 2.9 branch uses "hub 1.x
+#    (use_auth_token via sitecustomize)" -- THAT SHIM DOES NOT EXIST. A grep
+#    of the whole tree finds use_auth_token in that comment and nowhere else.
+#    Measured, with the shim absent:
+#        pyannote 3.4.0 + hub 1.33.0 -> Pipeline.from_pretrained raises
+#            TypeError: hf_hub_download() got an unexpected keyword
+#            argument 'use_auth_token'
+#        pyannote 3.4.0 + hub 0.36.2 -> Pipeline.from_pretrained OK
+#    And hub < 1.0 forces transformers 4.x, because transformers 5.x needs
+#    hub 1.x for ResolvedRevision.
 #
-# torch 2.8.0+xpu is the newest XPU wheel below the 2.9 boundary, and it takes
-# the bottom branch, which is intact:
+# coqui-tts 0.28 does NOT need the older transformers: it dropped the
+# isin_mps_friendly import that broke coqui-tts 0.27.5 against transformers
+# 5.x. The transformers 4.57.6 pin below is there for pyannote, not coqui.
 #
-#   transformers 4.57.6   -> still exports isin_mps_friendly
-#   huggingface-hub 0.36.2 -> the <1.0 cap pyannote 3.4.0 needs
-#   pyannote-audio 3.4.0   -> the last release before torchcodec
-#   torchcodec             -> not installed, and not needed below torch 2.9
+# The app's own installer does NOT arbitrate any of this: upstream runs
+# install_device_packages() only when script_mode == NATIVE, and this image
+# runs --script_mode full_docker. So the installer never runs and every pin
+# has to be here.
 #
 # pyannote-audio 3.4.0 pulls torch 2.15 from PyPI (the CUDA build) on the way
 # in, so the XPU torch has to be reinstalled AFTER it. Order matters here:
 # install the pins, then reinstall the XPU torch over the top.
 RUN pip install --no-cache-dir \
       "transformers==4.57.6" \
+      "tokenizers==0.22.2" \
       "huggingface-hub>=0.36.2,<1.0" \
       "pyannote-audio==3.4.0" \
  && pip install --no-cache-dir --index-url {{ arc_b70_e2a_index_url }} \
@@ -147,7 +162,7 @@ RUN set -eux; \
     python -c "import torch; v=torch.__version__; assert '+xpu' in v, v; assert torch.version.cuda is None, torch.version.cuda; print('FINAL-TORCH', v)"
 
 # The dependency pins have teeth only if they are actually in effect. A
-# resolved-but-unused transformers 5 would still break the engine, and a
+# resolved-but-unused transformers 5 would still break pyannote, and a
 # missing torchcodec would only surface at runtime. Assert the exact set.
 RUN set -eux; \
     python -c "\
@@ -156,10 +171,9 @@ from packaging.version import Version; \
 assert Version(md.version('transformers')) < Version('5'), md.version('transformers'); \
 assert Version(md.version('huggingface-hub')) < Version('1.0'), md.version('huggingface-hub'); \
 assert md.version('pyannote-audio') == '3.4.0', md.version('pyannote-audio'); \
-assert md.version('coqui-tts') == '0.27.5', md.version('coqui-tts'); \
-import transformers.pytorch_utils as pu; \
-assert hasattr(pu, 'isin_mps_friendly'), 'transformers no longer exports isin_mps_friendly'; \
-print('PINS OK', md.version('transformers'), md.version('huggingface-hub'))"
+assert md.version('coqui-tts') == '0.28.0', md.version('coqui-tts'); \
+assert Version(md.version('torch')) < Version('2.9'), md.version('torch'); \
+print('PINS OK', md.version('transformers'), md.version('huggingface-hub'), md.version('coqui-tts'))"
 
 # ---------------------------------------------------------------------------
 # THE SOX BACKEND IS DEAD ON THIS IMAGE.
@@ -179,25 +193,29 @@ print('PINS OK', md.version('transformers'), md.version('huggingface-hub'))"
 # clone a voice, so XTTS hits it on every book: the voice clone crashes the
 # whole conversion, silently, after the UI has already started work.
 #
-# torchaudio.load picks a backend through a dispatcher that holds the backend
-# map in a CLOSURE CELL captured at import time. Replacing the module attribute
-# get_available_backends does nothing to it -- the cell has to be written
-# directly, which is what sitecustomize.py does. Python imports sitecustomize
-# automatically at interpreter start, so this applies to every process in the
-# image, including the ones the app spawns.
+# UPSTREAM NOW FIXES THIS ITSELF. components/sitecustomize.py replaces
+# torchaudio.load with a soundfile-backed shim (the replacement's __name__ is
+# _load_via_soundfile), which is a better fix than patching the backend map:
+# it does not depend on torchaudio's internals staying the same.
 #
-# Removing sox leaves soundfile, which handles everything this app loads.
-COPY sitecustomize.py /opt/venv/lib/python3.12/site-packages/sitecustomize.py
+# It has to be COPIED into site-packages, not merely present in the checkout:
+# Python imports sitecustomize from site-packages at interpreter start, and
+# the app's own sync_sitecustomize() only writes into an ENGINE's venv, not
+# the main one this image runs in.
+COPY components/sitecustomize.py /opt/venv/lib/python3.12/site-packages/sitecustomize.py
 
 # Prove the patch is actually in effect and that loading a real WAV works.
 # This is the check that would have caught the silent segfault.
 RUN set -eux; \
     python -c "\
 import torchaudio; \
-d = torchaudio.load.__closure__[0].cell_contents; \
-b = d.__closure__[0].cell_contents; \
-assert 'sox' not in b, b; \
-print('SOX BACKEND REMOVED', list(b))"
+print('torchaudio.load:', torchaudio.load.__name__); \
+assert torchaudio.load.__name__ == '_load_via_soundfile', torchaudio.load.__name__; \
+import numpy as np, soundfile as sf; \
+sf.write('/tmp/soxcheck.wav', np.zeros(2400, dtype='float32'), 24000); \
+w, sr = torchaudio.load('/tmp/soxcheck.wav'); \
+print('SOX SHIM OK', tuple(w.shape), sr); \
+assert sr == 24000, sr"
 
 # Upstream's own directory layout -- the app reads and writes these paths.
 RUN mkdir -p /app/ebooks /app/audiobooks /app/models /app/voices /app/tmp /app/run

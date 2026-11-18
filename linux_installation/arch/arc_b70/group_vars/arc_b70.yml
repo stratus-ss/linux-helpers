@@ -323,7 +323,22 @@ arc_b70_frigate_go2rtc_streams:
 arc_b70_e2a_dir: "{{ arc_b70_root }}/ebook2audiobook"
 arc_b70_e2a_port: 7860
 arc_b70_e2a_source: "https://github.com/DrewThomasson/ebook2audiobook.git"
-arc_b70_e2a_commit: "4b182a3dc60e642901042de333b2f4e1b69dfe72"
+# Upstream HEAD as of 2026-11-18. This is a fast-forward of the previous pin
+# (4b182a3d, 2026-08-03) by 1472 commits.
+#
+# What the bump brings: coqui-tts 0.28 (which dropped the isin_mps_friendly
+# import that broke XTTS against transformers 5.x), gradio 6.32, upstream's own
+# components/sitecustomize.py (a soundfile-backed torchaudio.load shim, which
+# replaces the sox-backend workaround this role used to carry), and a
+# reworked XPU detection path.
+#
+# What it does NOT bring: a working torchcodec on XPU. Upstream's XPU row
+# targets torch 2.14.1 + torchcodec 0.17.0 and hard-fails when the torchcodec
+# import fails, which it does here -- torchcodec's shared objects link against
+# libnvrtc.so.13, and torchcodec-xpu ships only companion xpu_ops*.so while
+# torchlib-xpu is a metapackage with no binaries. So the recipe pins torch
+# below 2.9, where torchcodec is not required at all.
+arc_b70_e2a_commit: "29bc2ff277cdc48c858412a22baa3b07ea9589ba"
 arc_b70_e2a_build_context: "{{ arc_b70_e2a_dir }}/src"
 arc_b70_e2a_image: "arc_b70/ebook2audiobook:xpu"
 # NOTE: there is no base_image var. The image is built FROM SCRATCH on
